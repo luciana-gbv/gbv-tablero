@@ -371,11 +371,6 @@ async function doLogout() {
 
 async function initApp(user) {
   currentUser = user;
-  const { data: profile } = await sb.data.from('profiles').select('*').eq('id', user.id).single().catch(() =>
-    sb.from('profiles').select('*').eq('id', user.id).single()
-  );
-
-  // workaround — use sb directly
   const res = await sb.from('profiles').select('*').eq('id', user.id).single();
   currentProfile = res.data;
 

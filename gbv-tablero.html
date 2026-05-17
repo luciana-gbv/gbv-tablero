@@ -272,10 +272,22 @@ async function renderResumen(){
 }
 
 // ── CARGA ──
+let selectedUnidad=null;
+
 async function renderCarga(){
   const main=document.getElementById('main-content');
   const cats=[...new Set(allIndicadores.map(i=>i.categoria))];
   if(!selectedCat||!cats.includes(selectedCat))selectedCat=cats[0];
+
+  // Unidades disponibles según rol
+  let misUnidades=allUnidades;
+  if(currentProfile.rol==='encargado_campo'){
+    const ids=[...new Set(misCampos.map(c=>c.unidad_negocio_id))];
+    misUnidades=allUnidades.filter(u=>ids.includes(u.id));
+  }
+  if(!selectedUnidad||!misUnidades.find(u=>u.id===selectedUnidad))
+    selectedUnidad=misUnidades[0]?.id||null;
+
   main.innerHTML=`
     <div class="section-heading">Carga de datos</div>
     <div class="section-sub">Completá los indicadores que te corresponden</div>
@@ -289,10 +301,17 @@ async function renderCarga(){
             </button>`).join('')}
           </div>
         </div>
-        ${misCampos.length>0?`<div class="card">
-          <div class="card-title">Campo</div>
-          <div class="sidebar-nav" id="campo-nav">
-            ${misCampos.map(c=>`<button class="sidebar-item ${c.id===selectedCampo?'active':''}" onclick="selectCampoNav('${c.id}',this)">${c.nombre}</button>`).join('')}
+        ${misUnidades.length>0?`<div class="card">
+          <div class="card-title">Unidad de negocio</div>
+          <div class="sidebar-nav" id="unidad-nav">
+            ${misUnidades.map(u=>{
+              const campitos=allCampos.filter(c=>c.unidad_negocio_id===u.id);
+              const has=campitos.reduce((a,c)=>a+(c.hectareas||0),0);
+              return`<button class="sidebar-item ${u.id===selectedUnidad?'active':''}" onclick="selectUnidadNav('${u.id}',this)">
+                <span>${u.nombre}</span>
+                ${has>0?`<span style="font-size:.7rem;color:var(--muted)">${has.toLocaleString('es-AR')} ha</span>`:''}
+              </button>`;
+            }).join('')}
           </div>
         </div>`:''}
       </div>
@@ -307,9 +326,9 @@ function selectCat(cat,btn){
   btn.classList.add('active');loadIndicatorsPanel();
 }
 
-function selectCampoNav(id,btn){
-  selectedCampo=id;
-  document.querySelectorAll('#campo-nav .sidebar-item').forEach(b=>b.classList.remove('active'));
+function selectUnidadNav(id,btn){
+  selectedUnidad=id;
+  document.querySelectorAll('#unidad-nav .sidebar-item').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');loadIndicatorsPanel();
 }
 
@@ -318,12 +337,19 @@ async function loadIndicatorsPanel(){
   if(!panel)return;
   panel.innerHTML='<div class="loading">Cargando...</div>';
   const filtered=allIndicadores.filter(i=>i.categoria===selectedCat);
-  const campo=allCampos.find(c=>c.id===selectedCampo);
+
+  // Unidad seleccionada y sus campos
+  const unidad=allUnidades.find(u=>u.id===selectedUnidad);
+  const camposUnidad=allCampos.filter(c=>c.unidad_negocio_id===selectedUnidad);
+  const hasTotal=camposUnidad.reduce((a,c)=>a+(c.hectareas||0),0);
+
+  // Medidores y rodados de todos los campos de la unidad
   let medidores=[],rodados=[],rodadosBsAs=[];
-  if(campo){
+  if(camposUnidad.length>0){
+    const campoIds=camposUnidad.map(c=>c.id);
     const[{data:m},{data:r}]=await Promise.all([
-      sb.from('medidores_luz').select('*').eq('campo_id',campo.id).eq('activo',true),
-      sb.from('rodados').select('*').eq('campo_id',campo.id).eq('activo',true)
+      sb.from('medidores_luz').select('*').in('campo_id',campoIds).eq('activo',true),
+      sb.from('rodados').select('*,campos(nombre)').in('campo_id',campoIds).eq('activo',true)
     ]);
     medidores=m||[];rodados=r||[];
   }
@@ -331,43 +357,46 @@ async function loadIndicatorsPanel(){
     const{data:rb}=await sb.from('rodados').select('*').is('campo_id',null).eq('activo',true);
     rodadosBsAs=rb||[];
   }
+
   if(filtered.length===0){panel.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay indicadores en esta categoría.</div></div>';return;}
   if(selectedCat==='rrhh'&&!['programador','directorio','coo'].includes(currentProfile.rol)){
     panel.innerHTML='<div class="card"><div class="locked"><div style="font-size:2rem;margin-bottom:.75rem">🔒</div><div style="font-size:.85rem">Esta sección es solo para el Directorio.</div></div></div>';return;
   }
-  panel.innerHTML=filtered.map(ind=>renderIndCard(ind,campo,medidores,rodados,rodadosBsAs)).join('');
+  panel.innerHTML=filtered.map(ind=>renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs)).join('');
 }
 
-function renderIndCard(ind,campo,medidores,rodados,rodadosBsAs){
+function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
   const id=ind.id;
   const alertText=ind.alerta_min!==null?`Alerta si < ${ind.alerta_min}`:ind.alerta_max!==null?`Alerta si > ${ind.alerta_max}`:'';
   let inputHtml='';
   const isMulti=['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
+  const unidadId=unidad?.id||'';
+  const unidadNombre=unidad?.nombre||'';
 
   if(ind.nombre==='Planilla de hacienda'||ind.nombre==='Inventario stocks'||(ind.requiere_adjunto&&!isMulti)){
     inputHtml=`<div class="upload-zone" onclick="document.getElementById('file-${id}').click()">↑ Adjuntar archivo (PDF, Excel, imagen)<input type="file" id="file-${id}" style="display:none" onchange="handleFile('${id}',this)"/></div><div id="file-name-${id}" class="form-hint"></div>`;
   }else if(ind.nombre==='Consumos de luz por medidor'){
-    if(medidores.length===0){inputHtml=`<div class="alert alert-info">No hay medidores cargados para este campo. Pedile al administrador que los configure.</div>`;}
+    if(medidores.length===0){inputHtml=`<div class="alert alert-info">No hay medidores cargados para esta unidad. Pedile al administrador que los configure.</div>`;}
     else{inputHtml=medidores.map(m=>`<div class="sub-entry-card">
       <div class="sub-entry-title">Medidor ${m.numero_medidor}</div>
       <div class="sub-entry-meta">${m.empresa||''}</div>
       <div class="inline-row">
         <input type="number" class="form-input" id="med-${id}-${m.id}" placeholder="kWh" style="width:140px" step="any"/>
         <span style="font-size:.78rem;color:var(--muted)">kWh</span>
-        <button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${campo?.id||''}')">Guardar</button>
+        <button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${unidadId}')">Guardar</button>
       </div>
       <div id="msg-med-${id}-${m.id}"></div>
     </div>`).join('');}
   }else if(ind.nombre==='Kilometraje por camioneta'){
-    const lista=campo?rodados:rodadosBsAs;
-    if(lista.length===0){inputHtml=`<div class="alert alert-info">No hay rodados cargados para este campo.</div>`;}
+    const lista=rodados.length>0?rodados:rodadosBsAs;
+    if(lista.length===0){inputHtml=`<div class="alert alert-info">No hay rodados cargados para esta unidad.</div>`;}
     else{inputHtml=lista.map(r=>`<div class="sub-entry-card">
-      <div class="sub-entry-title">${r.patente}</div>
+      <div class="sub-entry-title">${r.patente} ${r.campos?.nombre?`<span style="font-size:.72rem;color:var(--muted)">· ${r.campos.nombre}</span>`:''}</div>
       <div class="sub-entry-meta">${r.descripcion||''}</div>
       <div class="inline-row">
         <input type="number" class="form-input" id="rod-km-${id}-${r.id}" placeholder="km actuales" style="width:150px"/>
         <div class="upload-zone" style="flex:1;padding:.4rem .75rem;font-size:.75rem" onclick="document.getElementById('odo-${r.id}').click()">📷 Foto odómetro<input type="file" id="odo-${r.id}" accept="image/*" style="display:none"/></div>
-        <button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${campo?.id||''}')">Guardar</button>
+        <button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${unidadId}')">Guardar</button>
       </div>
       <div id="msg-rod-${id}-${r.id}"></div>
     </div>`).join('');}
@@ -378,7 +407,7 @@ function renderIndCard(ind,campo,medidores,rodados,rodadosBsAs){
     inputHtml=`<div class="form-row">
       <div class="form-group"><label class="form-label">${labelA}</label><input type="number" class="form-input" id="val-a-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/></div>
       <div class="form-group"><label class="form-label">${labelB}</label><input type="number" class="form-input" id="val-b-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/>
-      ${campo?.hectareas&&ind.nombre.toLowerCase().includes('hectárea')?`<div class="form-hint">Superficie pre-cargada: <strong>${campo.hectareas.toLocaleString('es-AR')} ha</strong></div>`:''}</div>
+      ${hasTotal>0&&ind.nombre.toLowerCase().includes('hectárea')?`<div class="form-hint">Hectáreas totales de ${unidadNombre}: <strong>${hasTotal.toLocaleString('es-AR')} ha</strong></div>`:''}</div>
     </div><div id="auto-${id}"></div>`;
   }else{
     inputHtml=`<div class="form-group"><label class="form-label">Valor</label><input type="number" class="form-input" id="val-${id}" placeholder="Ingresá el valor" step="any"/></div>`;
@@ -395,8 +424,8 @@ function renderIndCard(ind,campo,medidores,rodados,rodadosBsAs){
     ${inputHtml}
     ${!isMulti?`<div style="display:flex;align-items:flex-end;gap:.75rem;margin-top:.75rem;flex-wrap:wrap">
       <div class="form-group" style="margin:0"><label class="form-label">Período</label><input type="date" class="form-input" id="fecha-${id}" value="${new Date().toISOString().split('T')[0]}" style="width:auto"/></div>
-      ${campo?`<div style="font-size:.78rem;color:var(--muted);margin-bottom:.2rem">Campo: <strong>${campo.nombre}</strong></div>`:''}
-      <button class="btn btn-accent" onclick="guardarEntry('${id}','${campo?.id||''}')">Guardar</button>
+      ${unidadNombre?`<div style="font-size:.78rem;color:var(--muted);margin-bottom:.2rem">Unidad: <strong>${unidadNombre}</strong></div>`:''}
+      <button class="btn btn-accent" onclick="guardarEntry('${id}','${unidadId}')">Guardar</button>
     </div>
     <div id="msg-${id}"></div>`:`<div class="form-group" style="margin-top:.75rem"><label class="form-label">Período (aplica a todos)</label><input type="date" class="form-input" id="fecha-${id}" value="${new Date().toISOString().split('T')[0]}" style="width:auto"/></div>`}
   </div>`;
@@ -411,7 +440,7 @@ function calcAuto(id){
 }
 function handleFile(id,input){const f=input.files[0];if(f){const el=document.getElementById('file-name-'+id);if(el)el.textContent='✓ '+f.name;}}
 
-async function guardarEntry(indId,campoId){
+async function guardarEntry(indId,unidadId){
   const msgEl=document.getElementById('msg-'+indId);
   if(msgEl){msgEl.textContent='Guardando...';msgEl.className='form-hint';}
   const fecha=document.getElementById('fecha-'+indId)?.value;
@@ -424,31 +453,31 @@ async function guardarEntry(indId,campoId){
   if(valAEl)valorA=parseFloat(valAEl.value)||null;
   if(valBEl)valorB=parseFloat(valBEl.value)||null;
   if(valorA&&valorB)valor=parseFloat((valorA/valorB*100).toFixed(4));
-  const{error}=await sb.from('entries').insert({indicador_id:indId,campo_id:campoId||null,user_id:currentUser.id,valor,valor_a:valorA,valor_b:valorB,periodo_fecha:fecha});
+  const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,valor_a:valorA,valor_b:valorB,periodo_fecha:fecha});
   if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
   else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);}
 }
 
-async function guardarMedidor(indId,medidorId,campoId){
+async function guardarMedidor(indId,medidorId,unidadId){
   const inp=document.getElementById(`med-${indId}-${medidorId}`);
   const msgEl=document.getElementById(`msg-med-${indId}-${medidorId}`);
   const fecha=document.getElementById('fecha-'+indId)?.value||new Date().toISOString().split('T')[0];
   const kwh=parseFloat(inp?.value);
   if(!kwh){if(msgEl){msgEl.textContent='Ingresá el valor kWh.';msgEl.className='msg-err';}return;}
-  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,campo_id:campoId||null,user_id:currentUser.id,valor:kwh,periodo_fecha:fecha}).select().single();
+  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor:kwh,periodo_fecha:fecha}).select().single();
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
   await sb.from('consumo_medidores').insert({entry_id:entry.id,medidor_id:medidorId,kwh});
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
   if(inp)inp.value='';setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
 }
 
-async function guardarKm(indId,rodadoId,campoId){
+async function guardarKm(indId,rodadoId,unidadId){
   const inp=document.getElementById(`rod-km-${indId}-${rodadoId}`);
   const msgEl=document.getElementById(`msg-rod-${indId}-${rodadoId}`);
   const fecha=document.getElementById('fecha-'+indId)?.value||new Date().toISOString().split('T')[0];
   const km=parseFloat(inp?.value);
   if(!km){if(msgEl){msgEl.textContent='Ingresá los km.';msgEl.className='msg-err';}return;}
-  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,campo_id:campoId||null,user_id:currentUser.id,valor:km,periodo_fecha:fecha}).select().single();
+  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor:km,periodo_fecha:fecha}).select().single();
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
   await sb.from('km_rodados').insert({entry_id:entry.id,rodado_id:rodadoId,km});
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}

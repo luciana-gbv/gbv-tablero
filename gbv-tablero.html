@@ -372,10 +372,13 @@ function renderIndCard(ind,campo,medidores,rodados,rodadosBsAs){
       <div id="msg-rod-${id}-${r.id}"></div>
     </div>`).join('');}
   }else if(ind.calculo_automatico&&ind.formula&&ind.formula.includes('/')){
+    const partes=ind.formula.split('/');
+    const labelA=partes[0]?partes[0].replace(/[()x×\d.]/g,'').replace(/N°/g,'Nº').trim():'Numerador';
+    const labelB=partes[1]?partes[1].replace(/[()x×\d.]/g,'').replace(/N°/g,'Nº').trim():'Denominador';
     inputHtml=`<div class="form-row">
-      <div class="form-group"><label class="form-label">Valor A (numerador)</label><input type="number" class="form-input" id="val-a-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/></div>
-      <div class="form-group"><label class="form-label">Valor B (denominador)</label><input type="number" class="form-input" id="val-b-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/>
-      ${campo?.hectareas&&ind.nombre.toLowerCase().includes('hectárea')?`<div class="form-hint">Superficie: <strong>${campo.hectareas.toLocaleString('es-AR')} ha</strong></div>`:''}</div>
+      <div class="form-group"><label class="form-label">${labelA}</label><input type="number" class="form-input" id="val-a-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/></div>
+      <div class="form-group"><label class="form-label">${labelB}</label><input type="number" class="form-input" id="val-b-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/>
+      ${campo?.hectareas&&ind.nombre.toLowerCase().includes('hectárea')?`<div class="form-hint">Superficie pre-cargada: <strong>${campo.hectareas.toLocaleString('es-AR')} ha</strong></div>`:''}</div>
     </div><div id="auto-${id}"></div>`;
   }else{
     inputHtml=`<div class="form-group"><label class="form-label">Valor</label><input type="number" class="form-input" id="val-${id}" placeholder="Ingresá el valor" step="any"/></div>`;

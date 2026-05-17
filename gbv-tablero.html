@@ -279,11 +279,15 @@ async function renderCarga(){
   const cats=[...new Set(allIndicadores.map(i=>i.categoria))];
   if(!selectedCat||!cats.includes(selectedCat))selectedCat=cats[0];
 
-  // Unidades disponibles según rol
-  let misUnidades=allUnidades;
+  // Cargar unidades permitidas para la categoría inicial
+  const{data:catU}=await sb.from('categoria_unidades').select('unidad_negocio_id').eq('categoria',selectedCat);
+  const permitidas=(catU||[]).map(cu=>cu.unidad_negocio_id);
+
+  // Unidades disponibles según rol y categoría
+  let misUnidades=allUnidades.filter(u=>permitidas.includes(u.id));
   if(currentProfile.rol==='encargado_campo'){
     const ids=[...new Set(misCampos.map(c=>c.unidad_negocio_id))];
-    misUnidades=allUnidades.filter(u=>ids.includes(u.id));
+    misUnidades=misUnidades.filter(u=>ids.includes(u.id));
   }
   if(!selectedUnidad||!misUnidades.find(u=>u.id===selectedUnidad))
     selectedUnidad=misUnidades[0]?.id||null;
@@ -301,7 +305,7 @@ async function renderCarga(){
             </button>`).join('')}
           </div>
         </div>
-        ${misUnidades.length>0?`<div class="card">
+        <div class="card">
           <div class="card-title">Unidad de negocio</div>
           <div class="sidebar-nav" id="unidad-nav">
             ${misUnidades.map(u=>{
@@ -313,7 +317,7 @@ async function renderCarga(){
               </button>`;
             }).join('')}
           </div>
-        </div>`:''}
+        </div>
       </div>
       <div id="indicators-panel"><div class="loading">Cargando...</div></div>
     </div>`;

@@ -338,6 +338,31 @@ async function loadIndicatorsPanel(){
   panel.innerHTML='<div class="loading">Cargando...</div>';
   const filtered=allIndicadores.filter(i=>i.categoria===selectedCat);
 
+  // Filtrar unidades permitidas para esta categoría
+  const{data:catUnidades}=await sb.from('categoria_unidades')
+    .select('unidad_negocio_id')
+    .eq('categoria',selectedCat);
+  const unidadesPermitidas=(catUnidades||[]).map(cu=>cu.unidad_negocio_id);
+
+  // Si la unidad seleccionada no está permitida, cambiar a la primera permitida
+  if(unidadesPermitidas.length>0&&!unidadesPermitidas.includes(selectedUnidad)){
+    selectedUnidad=unidadesPermitidas[0];
+  }
+
+  // Actualizar sidebar para mostrar solo unidades permitidas
+  const navEl=document.getElementById('unidad-nav');
+  if(navEl){
+    const unidadesFiltradas=allUnidades.filter(u=>unidadesPermitidas.includes(u.id));
+    navEl.innerHTML=unidadesFiltradas.map(u=>{
+      const campitos=allCampos.filter(c=>c.unidad_negocio_id===u.id);
+      const has=campitos.reduce((a,c)=>a+(c.hectareas||0),0);
+      return`<button class="sidebar-item ${u.id===selectedUnidad?'active':''}" onclick="selectUnidadNav('${u.id}',this)">
+        <span>${u.nombre}</span>
+        ${has>0?`<span style="font-size:.7rem;color:var(--muted)">${has.toLocaleString('es-AR')} ha</span>`:''}
+      </button>`;
+    }).join('');
+  }
+
   // Unidad seleccionada y sus campos
   const unidad=allUnidades.find(u=>u.id===selectedUnidad);
   const camposUnidad=allCampos.filter(c=>c.unidad_negocio_id===selectedUnidad);

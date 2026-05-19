@@ -145,8 +145,8 @@ let currentUser=null,currentProfile=null,currentTab='resumen';
 let allCampos=[],allUnidades=[],allIndicadores=[],misCampos=[];
 let selectedCampo=null,selectedCat=null;
 const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo'};
-const CAT_LABELS={gestion:'Gestión',financiero:'Financiero',comercial:'Comercial',productivo_global:'Productivo · Global',productivo_cria:'Productivo · Cría',productivo_recria:'Productivo · Recría',productivo_feedlot:'Productivo · Feedlot',alimenticio:'Alimenticio',sanitario:'Sanitario',mejoramiento_genetico:'Mejoramiento genético',ecologia:'Ecología',rrhh:'RRHH'};
-const CAT_ICONS={gestion:'📋',financiero:'📊',comercial:'📈',productivo_global:'🐄',productivo_cria:'🐮',productivo_recria:'🐂',productivo_feedlot:'🌽',alimenticio:'🌾',sanitario:'💉',mejoramiento_genetico:'🧬',ecologia:'🌿',rrhh:'👥'};
+const CAT_LABELS={gestion:'Gestión',financiero:'Financiero',comercial:'Comercial',productivo_global:'Productivo · Global',productivo_cria:'Productivo · Cría',productivo_recria:'Productivo · Recría',productivo_feedlot:'Productivo · Feedlot',alimenticio:'Alimenticio',sanitario:'Sanitario',mejoramiento_genetico:'Mejoramiento genético',ecologia:'Ecología',rrhh:'RRHH',inmuebles_urbanos:'Inmuebles Urbanos'};
+const CAT_ICONS={gestion:'📋',financiero:'📊',comercial:'📈',productivo_global:'🐄',productivo_cria:'🐮',productivo_recria:'🐂',productivo_feedlot:'🌽',alimenticio:'🌾',sanitario:'💉',mejoramiento_genetico:'🧬',ecologia:'🌿',rrhh:'👥',inmuebles_urbanos:'🏢'};
 
 async function doLogin(){
   const email=document.getElementById('login-email').value.trim();
@@ -173,7 +173,7 @@ async function initApp(user){
   if(!currentProfile){document.getElementById('login-error').textContent='No se encontró tu perfil.';return;}
   const[{data:campos},{data:unidades},{data:indicadores}]=await Promise.all([
     sb.from('campos').select('*,unidades_negocio(nombre)'),
-    sb.from('unidades_negocio').select('*').order('nombre'),
+    sb.from('unidades_negocio').select('*').order('orden'),
     sb.from('indicadores').select('*').eq('activo',true).order('orden')
   ]);
   allCampos=campos||[];allUnidades=unidades||[];allIndicadores=indicadores||[];
@@ -376,12 +376,13 @@ async function loadIndicatorsPanel(){
   let medidores=[],rodados=[],rodadosBsAs=[];
   if(camposUnidad.length>0){
     const campoIds=camposUnidad.map(c=>c.id);
-    const[{data:m},{data:r}]=await Promise.all([
-      sb.from('medidores_luz').select('*').in('campo_id',campoIds).eq('activo',true),
-      sb.from('rodados').select('*,campos(nombre)').in('campo_id',campoIds).eq('activo',true)
-    ]);
-    medidores=m||[];rodados=r||[];
+    const{data:m}=await sb.from('medidores_luz').select('*').in('campo_id',campoIds).eq('activo',true);
+    medidores=m||[];
   }
+  // Rodados filtrados por unidad de negocio
+  const{data:r}=await sb.from('rodados').select('*,campos(nombre)').eq('unidad_negocio_id',selectedUnidad).eq('activo',true);
+  rodados=r||[];
+  // Rodados de Administración BA para operativos
   if(['operativo','programador'].includes(currentProfile.rol)){
     const{data:rb}=await sb.from('rodados').select('*').is('campo_id',null).eq('activo',true);
     rodadosBsAs=rb||[];

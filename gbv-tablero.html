@@ -403,6 +403,37 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
   const unidadId=unidad?.id||'';
   const unidadNombre=unidad?.nombre||'';
 
+  // Indicadores por campo — muestran selector de campo y se cargan campo por campo
+  if(ind.por_campo){
+    const camposUnidad=allCampos.filter(c=>c.unidad_negocio_id===unidadId);
+    return`<div class="ind-card" id="ind-card-${id}">
+      <div class="ind-name">${ind.nombre}</div>
+      <div class="ind-meta">
+        <span class="pill">${ind.periodicidad}</span>
+        <span class="pill">${ind.unidad_medida}</span>
+        ${alertText?`<span class="pill pill-alert">${alertText}</span>`:''}
+        <span class="pill" style="background:#E8F0F8;color:#1A3A5C">Por campo</span>
+      </div>
+      ${ind.formula?`<div class="ind-formula">${ind.formula}</div>`:''}
+      ${camposUnidad.length===0?`<div class="alert alert-info">No hay campos cargados para esta unidad.</div>`:
+        camposUnidad.map(campo=>`
+        <div class="sub-entry-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+            <div class="sub-entry-title">📍 ${campo.nombre}</div>
+            ${campo.hectareas?`<span style="font-size:.75rem;color:var(--muted)">${campo.hectareas.toLocaleString('es-AR')} ha totales</span>`:''}
+          </div>
+          <div class="inline-row">
+            <input type="number" class="form-input" id="val-campo-${id}-${campo.id}" placeholder="${ind.unidad_medida==='hectareas'?'Hectáreas':'Valor'}" step="any" style="flex:1"/>
+            <div class="form-group" style="margin:0">
+              <input type="date" class="form-input" id="fecha-campo-${id}-${campo.id}" value="${new Date().toISOString().split('T')[0]}" style="width:auto"/>
+            </div>
+            <button class="btn btn-accent btn-sm" onclick="guardarEntryCampo('${id}','${campo.id}','${unidadId}')">Guardar</button>
+          </div>
+          <div id="msg-campo-${id}-${campo.id}"></div>
+        </div>`).join('')}
+    </div>`;
+  }
+
   if(ind.nombre==='Planilla de hacienda'||ind.nombre==='Inventario stocks'||(ind.requiere_adjunto&&!isMulti)){
     inputHtml=`<div class="upload-zone" onclick="document.getElementById('file-${id}').click()">↑ Adjuntar archivo (PDF, Excel, imagen)<input type="file" id="file-${id}" style="display:none" onchange="handleFile('${id}',this)"/></div><div id="file-name-${id}" class="form-hint"></div>`;
   }else if(ind.nombre==='Consumos de luz por medidor'){
@@ -469,6 +500,26 @@ function calcAuto(id){
   else if(el)el.innerHTML='';
 }
 function handleFile(id,input){const f=input.files[0];if(f){const el=document.getElementById('file-name-'+id);if(el)el.textContent='✓ '+f.name;}}
+
+async function guardarEntryCampo(indId,campoId,unidadId){
+  const inp=document.getElementById(`val-campo-${indId}-${campoId}`);
+  const fechaEl=document.getElementById(`fecha-campo-${indId}-${campoId}`);
+  const msgEl=document.getElementById(`msg-campo-${indId}-${campoId}`);
+  const valor=parseFloat(inp?.value);
+  const fecha=fechaEl?.value;
+  if(!valor){if(msgEl){msgEl.textContent='Ingresá un valor.';msgEl.className='msg-err';}return;}
+  if(!fecha){if(msgEl){msgEl.textContent='Seleccioná una fecha.';msgEl.className='msg-err';}return;}
+  const{error}=await sb.from('entries').insert({
+    indicador_id:indId,campo_id:campoId,unidad_negocio_id:unidadId||null,
+    user_id:currentUser.id,valor,periodo_fecha:fecha
+  });
+  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
+  else{
+    if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
+    if(inp)inp.value='';
+    setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  }
+}
 
 async function guardarEntry(indId,unidadId){
   const msgEl=document.getElementById('msg-'+indId);
@@ -591,31 +642,73 @@ async function loadHistorico(){
   const resEl=document.getElementById('hist-result');
   if(!indId)return;
   resEl.innerHTML='<div class="loading">Cargando...</div>';
-  let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max),campos(nombre),profiles(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:false});
+
+  // Verificar si es indicador por campo para mostrar vista consolidada
+  const ind=allIndicadores.find(i=>i.id===indId);
+
+  let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max,por_campo),campos(nombre,hectareas,unidades_negocio(nombre)),profiles(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:false});
   if(campoId)query=query.eq('campo_id',campoId);
   const{data:entries}=await query;
+
   if(!entries||entries.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay datos registrados.</div></div>';return;}
-  const ind=entries[0].indicadores;
+
+  const indData=entries[0].indicadores;
   const vals=entries.filter(e=>e.valor!==null).map(e=>e.valor);
   const media=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2):null;
+
+  // Vista consolidada para indicadores por campo (arrendamiento, aparcería, etc.)
+  let consolidadoHtml='';
+  if(indData?.por_campo && !campoId){
+    // Agrupar por campo y mostrar últimos valores
+    const porCampo={};
+    entries.forEach(e=>{
+      const cn=e.campos?.nombre||'Sin campo';
+      if(!porCampo[cn]){porCampo[cn]={campo:e.campos,entries:[]};}
+      porCampo[cn].entries.push(e);
+    });
+    consolidadoHtml=`
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title">Vista consolidada por campo — último valor cargado</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Campo</th><th>Unidad de negocio</th><th>Ha totales</th><th>Último valor</th><th>Período</th></tr></thead>
+          <tbody>${Object.entries(porCampo).map(([nombre,data])=>{
+            const ultimo=data.entries[0];
+            return`<tr>
+              <td><strong>${nombre}</strong></td>
+              <td>${data.campo?.unidades_negocio?.nombre||'—'}</td>
+              <td style="color:var(--muted)">${data.campo?.hectareas?data.campo.hectareas.toLocaleString('es-AR')+' ha':'—'}</td>
+              <td><strong>${ultimo.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${indData?.unidad_medida||''}</span></td>
+              <td>${ultimo.periodo_fecha?new Date(ultimo.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+        <div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border);font-size:.82rem;color:var(--muted)">
+          Total campos: ${Object.keys(porCampo).length} · 
+          Total ha: ${Object.values(porCampo).reduce((a,d)=>a+(d.campo?.hectareas||0),0).toLocaleString('es-AR')} ha ·
+          Total valor: ${Object.values(porCampo).reduce((a,d)=>a+(d.entries[0]?.valor||0),0).toLocaleString('es-AR')} ${indData?.unidad_medida||''}
+        </div>
+      </div>`;
+  }
+
   resEl.innerHTML=`
+    ${consolidadoHtml}
     <div class="metrics-grid" style="margin-bottom:1rem">
       <div class="metric-card"><div class="metric-label">Registros</div><div class="metric-value">${entries.length}</div></div>
-      <div class="metric-card"><div class="metric-label">Promedio</div><div class="metric-value">${media??'—'}</div><div class="metric-sub neutral">${ind?.unidad_medida||''}</div></div>
+      <div class="metric-card"><div class="metric-label">Promedio</div><div class="metric-value">${media??'—'}</div><div class="metric-sub neutral">${indData?.unidad_medida||''}</div></div>
       <div class="metric-card"><div class="metric-label">Máximo</div><div class="metric-value">${vals.length?Math.max(...vals).toFixed(2):'—'}</div></div>
       <div class="metric-card"><div class="metric-label">Mínimo</div><div class="metric-value">${vals.length?Math.min(...vals).toFixed(2):'—'}</div></div>
     </div>
-    <div class="card"><div class="card-title">${ind?.nombre||'Indicador'} · todos los registros</div>
+    <div class="card"><div class="card-title">${indData?.nombre||'Indicador'} · todos los registros</div>
       <div class="table-wrap"><table>
         <thead><tr><th>Período</th><th>Valor</th><th>Campo</th><th>Cargado por</th><th>Estado</th></tr></thead>
         <tbody>${entries.map(e=>{
           let estado='';
-          if(e.valor!==null&&ind?.alerta_min!==null&&e.valor<ind.alerta_min)estado='<span class="badge badge-late">Bajo mínimo</span>';
-          else if(e.valor!==null&&ind?.alerta_max!==null&&e.valor>ind.alerta_max)estado='<span class="badge badge-late">Sobre máximo</span>';
+          if(e.valor!==null&&indData?.alerta_min!==null&&e.valor<indData.alerta_min)estado='<span class="badge badge-late">Bajo mínimo</span>';
+          else if(e.valor!==null&&indData?.alerta_max!==null&&e.valor>indData.alerta_max)estado='<span class="badge badge-late">Sobre máximo</span>';
           else if(e.valor!==null)estado='<span class="badge badge-ok">Normal</span>';
           return`<tr>
             <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
-            <td><strong>${e.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${ind?.unidad_medida||''}</span></td>
+            <td><strong>${e.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${indData?.unidad_medida||''}</span></td>
             <td>${e.campos?.nombre||'—'}</td>
             <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
             <td>${estado}</td>

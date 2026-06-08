@@ -394,18 +394,47 @@ async function loadIndicatorsPanel(){
   if(selectedCat==='rrhh'&&!['programador','directorio','coo'].includes(currentProfile.rol)){
     panel.innerHTML='<div class="card"><div class="locked"><div style="font-size:2rem;margin-bottom:.75rem">🔒</div><div style="font-size:.85rem">Esta sección es solo para el Directorio.</div></div></div>';return;
   }
-  panel.innerHTML=filtered.map(ind=>renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs)).join('');
+  // Limpiar cache de variables al cambiar categoría
+  _varCache={};
+  const cards=await Promise.all(filtered.map(ind=>renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs)));
+  panel.innerHTML=cards.join('');
 }
 
-function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
+// Cache de variables por indicador y valores pre-cargados por período
+let _varCache={};
+let _valCache={};  // { clave_periodo: valor }
+
+async function getVariables(indId){
+  if(_varCache[indId]) return _varCache[indId];
+  const{data}=await sb.from('indicador_variables').select('*').eq('indicador_id',indId).order('orden');
+  _varCache[indId]=data||[];
+  return _varCache[indId];
+}
+
+// Buscar valores ya cargados para el mismo período y clave compartida
+async function getValoresPeriodo(claves, periodo, unidadId){
+  if(!claves.length||!periodo) return {};
+  // Buscar en entry_variables entries del mismo período y unidad
+  const{data}=await sb.from('entry_variables')
+    .select('clave,valor,entries!inner(periodo_fecha,unidad_negocio_id)')
+    .eq('entries.periodo_fecha', periodo)
+    .eq('entries.unidad_negocio_id', unidadId)
+    .in('clave', claves);
+  const result={};
+  (data||[]).forEach(ev=>{ if(!(ev.clave in result)) result[ev.clave]=ev.valor; });
+  return result;
+}
+
+async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
   const id=ind.id;
   const alertText=ind.alerta_min!==null?`Alerta si < ${ind.alerta_min}`:ind.alerta_max!==null?`Alerta si > ${ind.alerta_max}`:'';
-  let inputHtml='';
   const isMulti=['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
   const unidadId=unidad?.id||'';
   const unidadNombre=unidad?.nombre||'';
+  const hoy=new Date().toISOString().split('T')[0];
+  let inputHtml='';
 
-  // Indicadores por campo — muestran selector de campo y se cargan campo por campo
+  // INDICADORES POR CAMPO
   if(ind.por_campo){
     const camposUnidad=allCampos.filter(c=>c.unidad_negocio_id===unidadId);
     return`<div class="ind-card" id="ind-card-${id}">
@@ -426,9 +455,7 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
           </div>
           <div class="inline-row">
             <input type="number" class="form-input" id="val-campo-${id}-${campo.id}" placeholder="${ind.unidad_medida==='hectareas'?'Hectáreas':'Valor'}" step="any" style="flex:1"/>
-            <div class="form-group" style="margin:0">
-              <input type="date" class="form-input" id="fecha-campo-${id}-${campo.id}" value="${new Date().toISOString().split('T')[0]}" style="width:auto"/>
-            </div>
+            <input type="date" class="form-input" id="fecha-campo-${id}-${campo.id}" value="${hoy}" style="width:auto"/>
             <button class="btn btn-accent btn-sm" onclick="guardarEntryCampo('${id}','${campo.id}','${unidadId}')">Guardar</button>
           </div>
           <div id="msg-campo-${id}-${campo.id}"></div>
@@ -436,10 +463,13 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
     </div>`;
   }
 
+  // ADJUNTOS
   if(ind.nombre==='Planilla de hacienda'||ind.nombre==='Inventario stocks'||(ind.requiere_adjunto&&!isMulti)){
     inputHtml=`<div class="upload-zone" onclick="document.getElementById('file-${id}').click()">↑ Adjuntar archivo (PDF, Excel, imagen)<input type="file" id="file-${id}" style="display:none" onchange="handleFile('${id}',this)"/></div><div id="file-name-${id}" class="form-hint"></div>`;
+
+  // MEDIDORES
   }else if(ind.nombre==='Consumos de luz por medidor'){
-    if(medidores.length===0){inputHtml=`<div class="alert alert-info">No hay medidores cargados para esta unidad. Pedile al administrador que los configure.</div>`;}
+    if(medidores.length===0){inputHtml=`<div class="alert alert-info">No hay medidores cargados para esta unidad.</div>`;}
     else{inputHtml=medidores.map(m=>`<div class="sub-entry-card">
       <div class="sub-entry-title">Medidor ${m.numero_medidor}</div>
       <div class="sub-entry-meta">${m.empresa||''}</div>
@@ -450,6 +480,8 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
       </div>
       <div id="msg-med-${id}-${m.id}"></div>
     </div>`).join('');}
+
+  // RODADOS
   }else if(ind.nombre==='Kilometraje por camioneta'){
     const lista=rodados.length>0?rodados:rodadosBsAs;
     if(lista.length===0){inputHtml=`<div class="alert alert-info">No hay rodados cargados para esta unidad.</div>`;}
@@ -463,17 +495,40 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
       </div>
       <div id="msg-rod-${id}-${r.id}"></div>
     </div>`).join('');}
-  }else if(ind.calculo_automatico&&ind.formula&&ind.formula.includes('/')){
-    const partes=ind.formula.split('/');
-    const labelA=partes[0]?partes[0].replace(/[()x×\d.]/g,'').replace(/N°/g,'Nº').trim():'Numerador';
-    const labelB=partes[1]?partes[1].replace(/[()x×\d.]/g,'').replace(/N°/g,'Nº').trim():'Denominador';
-    inputHtml=`<div class="form-row">
-      <div class="form-group"><label class="form-label">${labelA}</label><input type="number" class="form-input" id="val-a-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/></div>
-      <div class="form-group"><label class="form-label">${labelB}</label><input type="number" class="form-input" id="val-b-${id}" placeholder="0" oninput="calcAuto('${id}')" step="any"/>
-      ${hasTotal>0&&ind.nombre.toLowerCase().includes('hectárea')?`<div class="form-hint">Hectáreas totales de ${unidadNombre}: <strong>${hasTotal.toLocaleString('es-AR')} ha</strong></div>`:''}</div>
-    </div><div id="auto-${id}"></div>`;
+
+  // INDICADORES CON VARIABLES DEFINIDAS EN BD
   }else{
-    inputHtml=`<div class="form-group"><label class="form-label">Valor</label><input type="number" class="form-input" id="val-${id}" placeholder="Ingresá el valor" step="any"/></div>`;
+    const vars=await getVariables(id);
+    if(vars.length>0){
+      const inputVars=vars.filter(v=>!v.es_calculado);
+      const calcVar=vars.find(v=>v.es_calculado);
+      // Buscar valores pre-cargados para el período actual
+      const claves=inputVars.map(v=>v.clave);
+      const preCargados=await getValoresPeriodo(claves, hoy, unidadId);
+
+      inputHtml=`
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+          ${inputVars.map(v=>{
+            const preval=preCargados[v.clave];
+            const bloqueado=preval!==undefined;
+            return`<div class="form-group">
+              <label class="form-label">${v.nombre} ${v.unidad?`<span style="color:var(--muted);font-weight:400">(${v.unidad})</span>`:''}
+              ${bloqueado?`<span style="font-size:.68rem;color:var(--success);margin-left:.25rem">✓ pre-cargado</span>`:''}</label>
+              <input type="number" class="form-input" 
+                id="var-${id}-${v.clave}" 
+                placeholder="0" 
+                value="${bloqueado?preval:''}"
+                ${bloqueado?'style="background:#F4FAF6;border-color:#A8D5B5" readonly title="Este valor ya fue cargado para este período"':''}
+                step="any"
+                oninput="calcVars('${id}')"/>
+            </div>`;
+          }).join('')}
+        </div>
+        ${calcVar?`<div id="calc-result-${id}" style="margin-top:.5rem"></div>`:''}`;
+    }else{
+      // Sin variables definidas — input simple
+      inputHtml=`<div class="form-group"><label class="form-label">Valor</label><input type="number" class="form-input" id="val-${id}" placeholder="Ingresá el valor" step="any"/></div>`;
+    }
   }
 
   return`<div class="ind-card" id="ind-card-${id}">
@@ -486,21 +541,124 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
     ${ind.formula?`<div class="ind-formula">${ind.formula}</div>`:''}
     ${inputHtml}
     ${!isMulti?`<div style="display:flex;align-items:flex-end;gap:.75rem;margin-top:.75rem;flex-wrap:wrap">
-      <div class="form-group" style="margin:0"><label class="form-label">Período</label><input type="date" class="form-input" id="fecha-${id}" value="${new Date().toISOString().split('T')[0]}" style="width:auto"/></div>
+      <div class="form-group" style="margin:0"><label class="form-label">Período</label>
+        <input type="date" class="form-input" id="fecha-${id}" value="${hoy}" style="width:auto" onchange="onFechaChange('${id}','${unidadId}')"/>
+      </div>
       ${unidadNombre?`<div style="font-size:.78rem;color:var(--muted);margin-bottom:.2rem">Unidad: <strong>${unidadNombre}</strong></div>`:''}
-      <button class="btn btn-accent" onclick="guardarEntry('${id}','${unidadId}')">Guardar</button>
+      <button class="btn btn-accent" onclick="guardarEntryVars('${id}','${unidadId}')">Guardar</button>
     </div>
-    <div id="msg-${id}"></div>`:`<div class="form-group" style="margin-top:.75rem"><label class="form-label">Período (aplica a todos)</label><input type="date" class="form-input" id="fecha-${id}" value="${new Date().toISOString().split('T')[0]}" style="width:auto"/></div>`}
+    <div id="msg-${id}"></div>`:`<div class="form-group" style="margin-top:.75rem"><label class="form-label">Período (aplica a todos)</label><input type="date" class="form-input" id="fecha-${id}" value="${hoy}" style="width:auto"/></div>`}
   </div>`;
 }
 
-function calcAuto(id){
-  const a=parseFloat(document.getElementById('val-a-'+id)?.value)||0;
-  const b=parseFloat(document.getElementById('val-b-'+id)?.value)||0;
-  const el=document.getElementById('auto-'+id);
-  if(el&&a&&b)el.innerHTML=`<span class="auto-result">= ${(a/b*100).toFixed(2)}%</span>`;
-  else if(el)el.innerHTML='';
+// Cuando cambia la fecha, re-buscar valores pre-cargados
+async function onFechaChange(indId, unidadId){
+  const fecha=document.getElementById('fecha-'+indId)?.value;
+  if(!fecha) return;
+  const vars=await getVariables(indId);
+  const inputVars=vars.filter(v=>!v.es_calculado);
+  const claves=inputVars.map(v=>v.clave);
+  const preCargados=await getValoresPeriodo(claves, fecha, unidadId);
+  inputVars.forEach(v=>{
+    const inp=document.getElementById(`var-${indId}-${v.clave}`);
+    if(!inp) return;
+    const preval=preCargados[v.clave];
+    if(preval!==undefined){
+      inp.value=preval;
+      inp.readOnly=true;
+      inp.style.background='#F4FAF6';
+      inp.style.borderColor='#A8D5B5';
+      inp.title='Este valor ya fue cargado para este período';
+    } else {
+      inp.readOnly=false;
+      inp.style.background='';
+      inp.style.borderColor='';
+      inp.title='';
+    }
+  });
+  calcVars(indId);
 }
+
+// Calcular resultado automático
+async function calcVars(indId){
+  const vars=await getVariables(indId);
+  const calcVar=vars.find(v=>v.es_calculado);
+  if(!calcVar) return;
+  const inputVars=vars.filter(v=>!v.es_calculado);
+  const vals={};
+  let completo=true;
+  inputVars.forEach(v=>{
+    const inp=document.getElementById(`var-${indId}-${v.clave}`);
+    const val=parseFloat(inp?.value);
+    if(isNaN(val)||val===0) completo=false;
+    vals[v.clave]=val||0;
+  });
+  const el=document.getElementById('calc-result-'+indId);
+  if(!el) return;
+  if(!completo){el.innerHTML='';return;}
+  try{
+    let formula=calcVar.formula_resultado;
+    Object.entries(vals).forEach(([k,v])=>{ formula=formula.replaceAll(k, v); });
+    const resultado=Function('"use strict";return ('+formula+')')();
+    el.innerHTML=`<span class="auto-result">= <strong>${isNaN(resultado)?'—':resultado.toFixed(4)}</strong> ${calcVar.unidad||''}</span>`;
+  }catch(e){el.innerHTML='';}
+}
+
+// Guardar entry con variables individuales
+async function guardarEntryVars(indId, unidadId){
+  const msgEl=document.getElementById('msg-'+indId);
+  if(msgEl){msgEl.textContent='Guardando...';msgEl.className='form-hint';}
+  const fecha=document.getElementById('fecha-'+indId)?.value;
+  if(!fecha){if(msgEl){msgEl.textContent='Seleccioná una fecha.';msgEl.className='msg-err';}return;}
+
+  const vars=await getVariables(indId);
+  const inputVars=vars.filter(v=>!v.es_calculado);
+  const calcVar=vars.find(v=>v.es_calculado);
+
+  // Si no hay variables definidas, usar input simple
+  if(vars.length===0){
+    const valEl=document.getElementById('val-'+indId);
+    const valor=parseFloat(valEl?.value)||null;
+    const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,periodo_fecha:fecha});
+    if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
+    else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);}
+    return;
+  }
+
+  // Calcular valor final
+  const vals={};
+  for(const v of inputVars){
+    const inp=document.getElementById(`var-${indId}-${v.clave}`);
+    vals[v.clave]=parseFloat(inp?.value)||0;
+  }
+  let valorFinal=null;
+  if(calcVar){
+    try{
+      let formula=calcVar.formula_resultado;
+      Object.entries(vals).forEach(([k,v])=>{formula=formula.replaceAll(k,v);});
+      valorFinal=parseFloat(Function('"use strict";return ('+formula+')')().toFixed(6));
+    }catch(e){}
+  }
+
+  // Insertar entry
+  const{data:entry,error:e1}=await sb.from('entries').insert({
+    indicador_id:indId,unidad_negocio_id:unidadId||null,
+    user_id:currentUser.id,valor:valorFinal,periodo_fecha:fecha
+  }).select().single();
+  if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
+
+  // Guardar variables individuales
+  const entryVars=inputVars.map(v=>({entry_id:entry.id,variable_id:v.id,clave:v.clave,valor:vals[v.clave]}));
+  if(calcVar) entryVars.push({entry_id:entry.id,variable_id:calcVar.id,clave:calcVar.clave,valor:valorFinal||0});
+  await sb.from('entry_variables').insert(entryVars);
+
+  if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
+  document.getElementById('ind-card-'+indId)?.classList.add('done');
+  // Limpiar cache de valores para que el pre-llenado se actualice
+  _valCache={};
+  setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+}
+
 function handleFile(id,input){const f=input.files[0];if(f){const el=document.getElementById('file-name-'+id);if(el)el.textContent='✓ '+f.name;}}
 
 async function guardarEntryCampo(indId,campoId,unidadId){
@@ -524,21 +682,7 @@ async function guardarEntryCampo(indId,campoId,unidadId){
 }
 
 async function guardarEntry(indId,unidadId){
-  const msgEl=document.getElementById('msg-'+indId);
-  if(msgEl){msgEl.textContent='Guardando...';msgEl.className='form-hint';}
-  const fecha=document.getElementById('fecha-'+indId)?.value;
-  if(!fecha){if(msgEl){msgEl.textContent='Seleccioná una fecha.';msgEl.className='msg-err';}return;}
-  let valor=null,valorA=null,valorB=null;
-  const valEl=document.getElementById('val-'+indId);
-  const valAEl=document.getElementById('val-a-'+indId);
-  const valBEl=document.getElementById('val-b-'+indId);
-  if(valEl)valor=parseFloat(valEl.value)||null;
-  if(valAEl)valorA=parseFloat(valAEl.value)||null;
-  if(valBEl)valorB=parseFloat(valBEl.value)||null;
-  if(valorA&&valorB)valor=parseFloat((valorA/valorB*100).toFixed(4));
-  const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,valor_a:valorA,valor_b:valorB,periodo_fecha:fecha});
-  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
-  else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);}
+  return guardarEntryVars(indId,unidadId);
 }
 
 async function guardarMedidor(indId,medidorId,unidadId){

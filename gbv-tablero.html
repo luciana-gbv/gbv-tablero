@@ -816,6 +816,20 @@ async function marcarVisto(entryId,btn){
   setTimeout(()=>renderBandeja(),1500);
 }
 
+function irACarga(categoria, indId){
+  selectedCat=categoria;
+  renderTab('carga');
+  // Después de renderizar, hacer scroll al indicador específico
+  setTimeout(()=>{
+    const el=document.getElementById('ind-card-'+indId);
+    if(el){
+      el.scrollIntoView({behavior:'smooth',block:'center'});
+      el.style.outline='2px solid var(--accent)';
+      setTimeout(()=>el.style.outline='',2000);
+    }
+  },800);
+}
+
 // ── CALENDARIO ──
 async function renderCalendario(){
   const main=document.getElementById('main-content');
@@ -884,7 +898,7 @@ async function renderCalendario(){
           <span style="min-width:90px;font-weight:500;color:${urgente?'var(--danger)':'var(--warning)'}">
             ${v.fecha_venc.toLocaleDateString('es-AR',{day:'2-digit',month:'short'})}
           </span>
-          <span style="flex:1;color:var(--text)">${v.nombre}</span>
+          <span style="flex:1;color:var(--text);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px" onclick="irACarga('${v.categoria}','${v.id}')" title="Ir a cargar">${v.nombre}</span>
           <span class="badge badge-na">${CAT_LABELS[v.categoria]||v.categoria}</span>
           <span style="font-size:.75rem;color:${urgente?'var(--danger)':'var(--muted)'}">
             ${diasRestantes===0?'Hoy':diasRestantes===1?'Mañana':`En ${diasRestantes} días`}
@@ -918,9 +932,11 @@ async function renderCalendario(){
               const vencido=v.fecha_venc<hoy&&!cargado;
               return`<div style="display:flex;align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.78rem">
                 <span style="min-width:28px;color:var(--muted);font-weight:500">${v.fecha_venc.getDate()}</span>
-                <span style="flex:1;color:${vencido?'var(--danger)':cargado?'var(--muted)':'var(--text)'};${cargado?'text-decoration:line-through':''}">${v.nombre}</span>
+                <span style="flex:1;color:${vencido?'var(--danger)':cargado?'var(--muted)':'var(--text)'};${cargado?'text-decoration:line-through':''}"
+                  ${!cargado?`onclick="irACarga('${v.categoria}','${v.id}')" style="cursor:pointer;${vencido?'color:var(--danger)':'color:var(--text)'};text-decoration:underline dotted;text-underline-offset:2px" title="Ir a cargar este indicador"`:''}
+                >${v.nombre}</span>
                 ${cargado?'<span style="color:var(--success);font-size:.75rem">✓</span>':
-                  vencido?'<span style="color:var(--danger);font-size:.75rem">●</span>':''}
+                  vencido?'<span style="color:var(--danger);font-size:.75rem">●</span>':'<span style="color:var(--muted);font-size:.75rem;cursor:pointer" onclick="irACarga(\''+v.categoria+'\',\''+v.id+'\')">→</span>'}
               </div>`;
             }).join('')}
         </div>`;

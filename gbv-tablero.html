@@ -6,6 +6,7 @@
 <title>GBV · Tablero de Comando</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 :root{--bg:#F5F3EE;--surface:#FFFFFF;--border:#E2DDD6;--text:#1A1916;--muted:#7A7570;--accent:#2D5A3D;--danger:#C0392B;--warning:#D4890A;--success:#2D5A3D;--info:#1A4A6B;--font-disp:'DM Serif Display',serif;--font-body:'DM Sans',sans-serif;--radius:10px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 12px rgba(0,0,0,0.04)}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1124,52 +1125,48 @@ async function loadHistorico(){
   if(!indId)return;
   resEl.innerHTML='<div class="loading">Cargando...</div>';
 
-  // Verificar si es indicador por campo para mostrar vista consolidada
-  const ind=allIndicadores.find(i=>i.id===indId);
-
-  let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max,por_campo),campos(nombre,hectareas,unidades_negocio(nombre)),profiles(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:false});
+  let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max,por_campo),campos(nombre,hectareas,unidades_negocio(nombre)),unidades_negocio(nombre),profiles(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:true});
   if(campoId)query=query.eq('campo_id',campoId);
   const{data:entries}=await query;
 
   if(!entries||entries.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay datos registrados.</div></div>';return;}
 
   const indData=entries[0].indicadores;
-  const vals=entries.filter(e=>e.valor!==null).map(e=>e.valor);
+  const entriesConValor=entries.filter(e=>e.valor!==null);
+  const vals=entriesConValor.map(e=>e.valor);
   const media=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2):null;
+  const alertMin=indData?.alerta_min;
+  const alertMax=indData?.alerta_max;
 
-  // Vista consolidada para indicadores por campo (arrendamiento, aparcería, etc.)
   let consolidadoHtml='';
-  if(indData?.por_campo && !campoId){
-    // Agrupar por campo y mostrar últimos valores
+  if(indData?.por_campo&&!campoId){
     const porCampo={};
     entries.forEach(e=>{
       const cn=e.campos?.nombre||'Sin campo';
       if(!porCampo[cn]){porCampo[cn]={campo:e.campos,entries:[]};}
       porCampo[cn].entries.push(e);
     });
-    consolidadoHtml=`
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-title">Vista consolidada por campo — último valor cargado</div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Campo</th><th>Unidad de negocio</th><th>Ha totales</th><th>Último valor</th><th>Período</th></tr></thead>
-          <tbody>${Object.entries(porCampo).map(([nombre,data])=>{
-            const ultimo=data.entries[0];
-            return`<tr>
-              <td><strong>${nombre}</strong></td>
-              <td>${data.campo?.unidades_negocio?.nombre||'—'}</td>
-              <td style="color:var(--muted)">${data.campo?.hectareas?data.campo.hectareas.toLocaleString('es-AR')+' ha':'—'}</td>
-              <td><strong>${ultimo.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${indData?.unidad_medida||''}</span></td>
-              <td>${ultimo.periodo_fecha?new Date(ultimo.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>
-        <div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border);font-size:.82rem;color:var(--muted)">
-          Total campos: ${Object.keys(porCampo).length} · 
-          Total ha: ${Object.values(porCampo).reduce((a,d)=>a+(d.campo?.hectareas||0),0).toLocaleString('es-AR')} ha ·
-          Total valor: ${Object.values(porCampo).reduce((a,d)=>a+(d.entries[0]?.valor||0),0).toLocaleString('es-AR')} ${indData?.unidad_medida||''}
-        </div>
-      </div>`;
+    consolidadoHtml=`<div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Vista consolidada por campo</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Campo</th><th>Unidad</th><th>Ha totales</th><th>Último valor</th><th>Período</th></tr></thead>
+        <tbody>${Object.entries(porCampo).map(([nombre,data])=>{
+          const ultimo=data.entries[data.entries.length-1];
+          return`<tr><td><strong>${nombre}</strong></td><td>${data.campo?.unidades_negocio?.nombre||'—'}</td>
+            <td style="color:var(--muted)">${data.campo?.hectareas?data.campo.hectareas.toLocaleString('es-AR')+' ha':'—'}</td>
+            <td><strong>${ultimo.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${indData?.unidad_medida||''}</span></td>
+            <td>${ultimo.periodo_fecha?new Date(ultimo.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      <div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border);font-size:.82rem;color:var(--muted)">
+        Total campos: ${Object.keys(porCampo).length} · Total valor: ${Object.values(porCampo).reduce((a,d)=>a+(d.entries[d.entries.length-1]?.valor||0),0).toLocaleString('es-AR')} ${indData?.unidad_medida||''}
+      </div>
+    </div>`;
   }
+
+  const labels=entriesConValor.map(e=>e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'short',year:'2-digit'}):'—');
+  const dataVals=entriesConValor.map(e=>e.valor);
+  const mediaNum=parseFloat(media);
 
   resEl.innerHTML=`
     ${consolidadoHtml}
@@ -1179,24 +1176,104 @@ async function loadHistorico(){
       <div class="metric-card"><div class="metric-label">Máximo</div><div class="metric-value">${vals.length?Math.max(...vals).toFixed(2):'—'}</div></div>
       <div class="metric-card"><div class="metric-label">Mínimo</div><div class="metric-value">${vals.length?Math.min(...vals).toFixed(2):'—'}</div></div>
     </div>
-    <div class="card"><div class="card-title">${indData?.nombre||'Indicador'} · todos los registros</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Período</th><th>Valor</th><th>Campo</th><th>Cargado por</th><th>Estado</th></tr></thead>
-        <tbody>${entries.map(e=>{
-          let estado='';
-          if(e.valor!==null&&indData?.alerta_min!==null&&e.valor<indData.alerta_min)estado='<span class="badge badge-late">Bajo mínimo</span>';
-          else if(e.valor!==null&&indData?.alerta_max!==null&&e.valor>indData.alerta_max)estado='<span class="badge badge-late">Sobre máximo</span>';
-          else if(e.valor!==null)estado='<span class="badge badge-ok">Normal</span>';
-          return`<tr>
-            <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
-            <td><strong>${e.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${indData?.unidad_medida||''}</span></td>
-            <td>${e.campos?.nombre||'—'}</td>
-            <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
-            <td>${estado}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div>
+
+    ${entriesConValor.length>1?`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">${indData?.nombre||'Indicador'} · evolución histórica</div>
+      <div style="position:relative;height:260px"><canvas id="chart-historico"></canvas></div>
+      <div style="display:flex;gap:1rem;margin-top:.75rem;font-size:.75rem;color:var(--muted);flex-wrap:wrap">
+        <span>─ Valor real</span>
+        <span style="opacity:.6">- - Promedio</span>
+        ${alertMin!==null?`<span style="color:var(--danger)">- - Mínimo esperado (${alertMin})</span>`:''}
+        ${alertMax!==null?`<span style="color:var(--warning)">- - Máximo esperado (${alertMax})</span>`:''}
+      </div>
+    </div>`:''}
+
+    <div class="card">
+      <div class="card-title">${indData?.nombre||'Indicador'} · registros</div>
+      <div class="tab-row" style="margin-bottom:.75rem">
+        <button class="tab-btn active" onclick="histTab('tabla',this)">Tabla</button>
+        <button class="tab-btn" onclick="histTab('variables',this)">Variables detalle</button>
+      </div>
+      <div id="hist-tabla">
+        <div class="table-wrap"><table>
+          <thead><tr><th>Período</th><th>Valor</th><th>Unidad / Campo</th><th>Cargado por</th><th>Estado</th></tr></thead>
+          <tbody>${entries.slice().reverse().map(e=>{
+            let estado='';
+            if(e.valor!==null&&alertMin!==null&&e.valor<alertMin)estado='<span class="badge badge-late">Bajo mínimo</span>';
+            else if(e.valor!==null&&alertMax!==null&&e.valor>alertMax)estado='<span class="badge badge-late">Sobre máximo</span>';
+            else if(e.valor!==null)estado='<span class="badge badge-ok">Normal</span>';
+            return`<tr>
+              <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
+              <td><strong>${e.valor??'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${indData?.unidad_medida||''}</span></td>
+              <td>${e.unidades_negocio?.nombre||e.campos?.nombre||'—'}</td>
+              <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
+              <td>${estado}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+      <div id="hist-variables" style="display:none">
+        <div id="hist-vars-content" style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem">Cargando variables...</div>
+      </div>
     </div>`;
+
+  // Renderizar gráfico
+  if(entriesConValor.length>1){
+    setTimeout(()=>{
+      const ctx=document.getElementById('chart-historico');
+      if(!ctx||typeof Chart==='undefined') return;
+      const datasets=[
+        {label:'Valor real',data:dataVals,borderColor:'#2D5A3D',backgroundColor:'rgba(45,90,61,0.08)',tension:0.3,fill:true,borderWidth:2,pointRadius:4,pointBackgroundColor:'#2D5A3D',pointBorderColor:'#fff',pointBorderWidth:2},
+        {label:'Promedio',data:dataVals.map(()=>mediaNum),borderColor:'#7A7570',borderDash:[6,4],tension:0,fill:false,borderWidth:1.5,pointRadius:0}
+      ];
+      if(alertMin!==null) datasets.push({label:'Mínimo',data:dataVals.map(()=>alertMin),borderColor:'#C0392B',borderDash:[4,4],tension:0,fill:false,borderWidth:1.5,pointRadius:0});
+      if(alertMax!==null) datasets.push({label:'Máximo',data:dataVals.map(()=>alertMax),borderColor:'#D4890A',borderDash:[4,4],tension:0,fill:false,borderWidth:1.5,pointRadius:0});
+      new Chart(ctx,{
+        type:'line',data:{labels,datasets},
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{label:c=>`${c.dataset.label}: ${c.parsed.y?.toFixed(2)||'—'} ${indData?.unidad_medida||''}`}}},
+          scales:{
+            y:{ticks:{font:{size:11},callback:v=>`${v} ${indData?.unidad_medida||''}`},grid:{color:'rgba(120,120,120,0.08)'}},
+            x:{ticks:{font:{size:11},maxRotation:45},grid:{display:false}}
+          }
+        }
+      });
+    },100);
+  }
+
+  loadHistVariables(indId,entries);
+}
+
+function histTab(tab,btn){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('hist-tabla').style.display=tab==='tabla'?'block':'none';
+  document.getElementById('hist-variables').style.display=tab==='variables'?'block':'none';
+}
+
+async function loadHistVariables(indId,entries){
+  const vars=await getVariables(indId);
+  const el=document.getElementById('hist-vars-content');
+  if(!el) return;
+  if(!vars.length){el.innerHTML='<div style="color:var(--muted)">Este indicador no tiene variables detalladas.</div>';return;}
+  const entryIds=entries.map(e=>e.id);
+  const{data:evs}=await sb.from('entry_variables').select('*').in('entry_id',entryIds);
+  const evPorEntry={};
+  (evs||[]).forEach(ev=>{if(!evPorEntry[ev.entry_id])evPorEntry[ev.entry_id]={};evPorEntry[ev.entry_id][ev.clave]=ev.valor;});
+  const inputVars=vars.filter(v=>!v.es_calculado);
+  const calcVar=vars.find(v=>v.es_calculado);
+  el.innerHTML=`<div class="table-wrap"><table>
+    <thead><tr><th>Período</th>${inputVars.map(v=>`<th>${v.nombre} (${v.unidad||''})</th>`).join('')}${calcVar?`<th style="color:var(--accent)">${calcVar.nombre}</th>`:''}</tr></thead>
+    <tbody>${entries.slice().reverse().map(e=>{
+      const ev=evPorEntry[e.id]||{};
+      return`<tr><td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
+        ${inputVars.map(v=>`<td>${ev[v.clave]!==undefined?ev[v.clave].toLocaleString('es-AR'):'—'}</td>`).join('')}
+        ${calcVar?`<td style="font-weight:500;color:var(--accent)">${e.valor!==null?e.valor.toFixed(4):'—'}</td>`:''}
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
 }
 
 // ── ADMIN ──

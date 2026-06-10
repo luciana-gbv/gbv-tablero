@@ -134,6 +134,7 @@ tr:hover td{background:var(--bg)}
     </div>
   </div>
   <div class="nav-tabs" id="nav-tabs"></div>
+  <div id="alerta-banner"></div>
   <div class="main" id="main-content"><div class="loading">Cargando...</div></div>
 </div>
 
@@ -190,7 +191,69 @@ async function initApp(user){
   appEl.style.display='flex';appEl.style.flexDirection='column';
   document.getElementById('topbar-name').textContent=(currentProfile.nombre||'')+' '+(currentProfile.apellido||'');
   document.getElementById('topbar-role').textContent=ROL_LABELS[currentProfile.rol]||currentProfile.rol;
-  buildNav();renderTab('resumen');
+  buildNav();
+  await mostrarAlertas();
+  renderTab('resumen');
+}
+
+async function mostrarAlertas(){
+  const hoy=new Date();
+  const maniana=new Date(hoy); maniana.setDate(maniana.getDate()+1);
+  const anio=hoy.getFullYear();
+
+  // Cargar entries del año
+  const{data:entries}=await sb.from('entries')
+    .select('indicador_id,periodo_fecha')
+    .gte('periodo_fecha',`${anio}-01-01`)
+    .lte('periodo_fecha',`${anio}-12-31`);
+  const cargados=new Set((entries||[]).map(e=>e.indicador_id+'_'+e.periodo_fecha));
+
+  // Calcular vencimientos
+  const vencidos=[], manana=[], enSemana=[];
+  allIndicadores.forEach(ind=>{
+    const fechas=getVencimientosAnio(ind,anio);
+    fechas.forEach(f=>{
+      const key=ind.id+'_'+f.toISOString().split('T')[0];
+      if(cargados.has(key)) return;
+      const diff=Math.ceil((f-hoy)/(1000*60*60*24));
+      if(diff<0) vencidos.push({...ind,fecha_venc:f,diff});
+      else if(diff===0||diff===1) manana.push({...ind,fecha_venc:f,diff});
+      else if(diff<=7) enSemana.push({...ind,fecha_venc:f,diff});
+    });
+  });
+
+  // Para directorio/COO: ver también quién no cumplió
+  let incumplidoresHtml='';
+  if(['programador','directorio','coo'].includes(currentProfile.rol)&&vencidos.length>0){
+    incumplidoresHtml=`<button onclick="renderTab('calendario')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #8B1C1C;background:transparent;color:#8B1C1C;cursor:pointer;margin-left:.5rem">Ver en calendario →</button>`;
+  }
+
+  // Construir banner
+  const alertaDiv=document.getElementById('alerta-banner');
+  if(!alertaDiv) return;
+
+  let html='';
+  if(vencidos.length>0){
+    html+=`<div class="alert alert-danger" style="margin:0 1.5rem;margin-top:.75rem">
+      ⚠ <strong>${vencidos.length} indicador${vencidos.length>1?'es':''} vencido${vencidos.length>1?'s':''} sin cargar</strong>
+      — ${vencidos.slice(0,3).map(v=>v.nombre).join(', ')}${vencidos.length>3?` y ${vencidos.length-3} más`:''}
+      ${incumplidoresHtml}
+    </div>`;
+  }
+  if(manana.length>0){
+    html+=`<div class="alert alert-warning" style="margin:0 1.5rem;margin-top:.5rem">
+      ⏰ <strong>${manana.length} indicador${manana.length>1?'es':''}</strong> vence${manana.length>1?'n':''} hoy o mañana
+      — ${manana.slice(0,3).map(v=>v.nombre).join(', ')}${manana.length>3?` y ${manana.length-3} más`:''}
+      <button onclick="renderTab('calendario')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #7A5A00;background:transparent;color:#7A5A00;cursor:pointer;margin-left:.5rem">Ver →</button>
+    </div>`;
+  }
+  if(enSemana.length>0&&vencidos.length===0&&manana.length===0){
+    html+=`<div class="alert alert-info" style="margin:0 1.5rem;margin-top:.75rem">
+      📅 <strong>${enSemana.length} indicador${enSemana.length>1?'es':''}</strong> vence${enSemana.length>1?'n':''} esta semana
+      <button onclick="renderTab('calendario')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #1A3A5C;background:transparent;color:#1A3A5C;cursor:pointer;margin-left:.5rem">Ver →</button>
+    </div>`;
+  }
+  alertaDiv.innerHTML=html;
 }
 
 const TAB_DEFS=[

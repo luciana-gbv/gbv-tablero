@@ -196,10 +196,11 @@ async function initApp(user){
 const TAB_DEFS=[
   {id:'resumen',label:'Resumen',roles:['programador','directorio','coo','operativo','encargado_campo']},
   {id:'carga',label:'Carga de datos',roles:['programador','coo','operativo','encargado_campo']},
+  {id:'calendario',label:'Calendario',roles:['programador','directorio','coo','operativo','encargado_campo']},
   {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo']},
+  {id:'puestos',label:'Puestos',roles:['programador','directorio','coo']},
   {id:'historico',label:'Históricos',roles:['programador','directorio','coo','operativo']},
   {id:'admin',label:'Administración',roles:['programador','coo']},
-  {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo']},
 ];
 
 function buildNav(){
@@ -222,6 +223,7 @@ function renderTab(tab){
   document.getElementById('main-content').innerHTML='<div class="loading">Cargando...</div>';
   if(tab==='resumen')renderResumen();
   if(tab==='carga')renderCarga();
+  if(tab==='calendario')renderCalendario();
   if(tab==='bandeja')renderBandeja();
   if(tab==='puestos')renderPuestos();
   if(tab==='historico')renderHistorico();
@@ -812,6 +814,157 @@ async function marcarVisto(entryId,btn){
 
   // Actualizar contador de pendientes
   setTimeout(()=>renderBandeja(),1500);
+}
+
+// ── CALENDARIO ──
+async function renderCalendario(){
+  const main=document.getElementById('main-content');
+  main.innerHTML='<div class="loading">Cargando...</div>';
+
+  const hoy=new Date();
+  const anio=hoy.getFullYear();
+  const mesActual=hoy.getMonth(); // 0-based
+
+  // Cargar indicadores con vencimientos
+  const{data:indicadores}=await sb.from('indicadores')
+    .select('*').eq('activo',true).order('categoria').order('orden');
+
+  // Generar todos los vencimientos del año
+  const vencimientos=[];
+  (indicadores||[]).forEach(ind=>{
+    const fechas=getVencimientosAnio(ind, anio);
+    fechas.forEach(f=>vencimientos.push({...ind, fecha_venc:f}));
+  });
+
+  // Cargar entries del año para saber cuáles ya fueron cargados
+  const{data:entries}=await sb.from('entries')
+    .select('indicador_id,periodo_fecha,user_id')
+    .gte('periodo_fecha', `${anio}-01-01`)
+    .lte('periodo_fecha', `${anio}-12-31`);
+  const cargados=new Set((entries||[]).map(e=>e.indicador_id+'_'+e.periodo_fecha));
+
+  // Agrupar por mes
+  const porMes={};
+  for(let m=0;m<12;m++) porMes[m]=[];
+  vencimientos.forEach(v=>{
+    const mes=v.fecha_venc.getMonth();
+    if(porMes[mes]) porMes[mes].push(v);
+  });
+
+  const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  // Próximos vencimientos (30 días)
+  const en30dias=new Date(hoy); en30dias.setDate(en30dias.getDate()+30);
+  const proximos=vencimientos.filter(v=>v.fecha_venc>=hoy&&v.fecha_venc<=en30dias)
+    .sort((a,b)=>a.fecha_venc-b.fecha_venc);
+
+  // Vencidos sin cargar
+  const vencidosSinCargar=vencimientos.filter(v=>{
+    if(v.fecha_venc>hoy) return false;
+    const periodoKey=v.id+'_'+v.fecha_venc.toISOString().split('T')[0];
+    return !cargados.has(periodoKey);
+  });
+
+  main.innerHTML=`
+    <div class="section-heading">Calendario de vencimientos</div>
+    <div class="section-sub">${anio} · ${indicadores?.length||0} indicadores configurados</div>
+
+    ${vencidosSinCargar.length>0?`
+    <div class="alert alert-danger" style="margin-bottom:1rem">
+      ⚠ <strong>${vencidosSinCargar.length} indicador${vencidosSinCargar.length>1?'es':''}</strong> vencido${vencidosSinCargar.length>1?'s':''} sin cargar
+    </div>`:''}
+
+    ${proximos.length>0?`
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title">⏰ Próximos 30 días (${proximos.length} vencimientos)</div>
+      ${proximos.slice(0,10).map(v=>{
+        const diasRestantes=Math.ceil((v.fecha_venc-hoy)/(1000*60*60*24));
+        const urgente=diasRestantes<=7;
+        return`<div style="display:flex;align-items:center;gap:.75rem;padding:.6rem 0;border-bottom:1px solid var(--border);font-size:.83rem">
+          <span style="min-width:90px;font-weight:500;color:${urgente?'var(--danger)':'var(--warning)'}">
+            ${v.fecha_venc.toLocaleDateString('es-AR',{day:'2-digit',month:'short'})}
+          </span>
+          <span style="flex:1;color:var(--text)">${v.nombre}</span>
+          <span class="badge badge-na">${CAT_LABELS[v.categoria]||v.categoria}</span>
+          <span style="font-size:.75rem;color:${urgente?'var(--danger)':'var(--muted)'}">
+            ${diasRestantes===0?'Hoy':diasRestantes===1?'Mañana':`En ${diasRestantes} días`}
+          </span>
+        </div>`;
+      }).join('')}
+      ${proximos.length>10?`<div style="font-size:.78rem;color:var(--muted);margin-top:.5rem">Y ${proximos.length-10} más...</div>`:''}
+    </div>`:''}
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">
+      ${MESES.map((mes,idx)=>{
+        const esMesActual=idx===mesActual;
+        const esPasado=idx<mesActual;
+        const venc=porMes[idx]||[];
+        const cargadosDelMes=venc.filter(v=>cargados.has(v.id+'_'+v.fecha_venc.toISOString().split('T')[0])).length;
+        const pendientes=venc.length-cargadosDelMes;
+
+        return`<div class="card" style="${esMesActual?'border-color:var(--accent);':esPasado?'opacity:0.7':''}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+            <div style="font-weight:500;font-size:.95rem;color:${esMesActual?'var(--accent)':'var(--text)'}">${mes} ${anio}</div>
+            <div style="display:flex;gap:.4rem">
+              ${venc.length>0?`<span class="badge badge-na">${venc.length} venc.</span>`:''}
+              ${pendientes>0&&!esPasado?`<span class="badge badge-pend">${pendientes} pend.</span>`:''}
+              ${cargadosDelMes>0?`<span class="badge badge-ok">${cargadosDelMes} ✓</span>`:''}
+            </div>
+          </div>
+          ${venc.length===0?`<div style="font-size:.78rem;color:var(--muted);text-align:center;padding:.5rem 0">Sin vencimientos</div>`:
+            venc.sort((a,b)=>a.fecha_venc-b.fecha_venc).map(v=>{
+              const key=v.id+'_'+v.fecha_venc.toISOString().split('T')[0];
+              const cargado=cargados.has(key);
+              const vencido=v.fecha_venc<hoy&&!cargado;
+              return`<div style="display:flex;align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.78rem">
+                <span style="min-width:28px;color:var(--muted);font-weight:500">${v.fecha_venc.getDate()}</span>
+                <span style="flex:1;color:${vencido?'var(--danger)':cargado?'var(--muted)':'var(--text)'};${cargado?'text-decoration:line-through':''}">${v.nombre}</span>
+                ${cargado?'<span style="color:var(--success);font-size:.75rem">✓</span>':
+                  vencido?'<span style="color:var(--danger);font-size:.75rem">●</span>':''}
+              </div>`;
+            }).join('')}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function getVencimientosAnio(ind, anio){
+  const fechas=[];
+  const dia=ind.vencimiento_dia||15;
+
+  if(ind.periodicidad==='mensual'||ind.periodicidad==='semanal'){
+    // Mensual: vence día 5 de cada mes
+    for(let m=0;m<12;m++){
+      fechas.push(new Date(anio,m,dia));
+    }
+  } else if(ind.periodicidad==='trimestral'){
+    // Vence el 15 de abril, julio, octubre, enero
+    [[0,15],[3,15],[6,15],[9,15]].forEach(([m,d])=>{
+      const f=new Date(anio,m+3===12?0:m+3, d);
+      if(m+3===12) f.setFullYear(anio+1);
+      fechas.push(new Date(anio, m===9?0:m+3, d));
+    });
+    // Simplificado: 15 de cada mes que cierra trimestre
+    fechas.length=0;
+    [3,6,9].forEach(m=>fechas.push(new Date(anio,m,15)));
+    fechas.push(new Date(anio+1,0,15));
+  } else if(ind.periodicidad==='semestral'){
+    const tipo=ind.periodo_inicio||'semestral_ene_dic';
+    if(tipo==='semestral_ago_feb'){
+      fechas.push(new Date(anio,1,15));  // 15 febrero
+      fechas.push(new Date(anio,7,15));  // 15 agosto
+    } else {
+      fechas.push(new Date(anio,2,15));  // 15 marzo
+      fechas.push(new Date(anio,8,15));  // 15 septiembre
+    }
+  } else if(ind.periodicidad==='anual'){
+    const mes=(ind.vencimiento_mes||3)-1; // 0-based
+    fechas.push(new Date(anio,mes,dia));
+    // Si el período es julio-junio, vence en septiembre
+    if(ind.periodo_inicio==='julio') fechas.push(new Date(anio,8,15));
+  }
+
+  return fechas.filter(f=>!isNaN(f.getTime()));
 }
 
 // ── PUESTOS ──

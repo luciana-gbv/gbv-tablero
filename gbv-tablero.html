@@ -553,10 +553,64 @@ function getPeriodoFijo(ind){
   return new Date(anio,mes,0).toISOString().split('T')[0];
 }
 
-function formatPeriodoLabel(fechaStr){
-  if(!fechaStr) return '—';
-  const f=new Date(fechaStr+'T12:00:00');
-  return f.toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
+function getPeriodoRango(ind){
+  const hoy=new Date();
+  const anio=hoy.getFullYear();
+  const mes=hoy.getMonth();
+  const per=ind.periodicidad;
+  const periodoInicio=ind.periodo_inicio||'';
+
+  if(per==='mensual'||per==='semanal'){
+    const inicioMes=new Date(anio,mes-1,1);
+    const finMes=new Date(anio,mes,0);
+    return{inicio:inicioMes,fin:finMes};
+  }
+  if(per==='trimestral'){
+    const cierres=[[0,2,31],[3,5,30],[6,8,30],[9,11,31]];
+    for(let i=cierres.length-1;i>=0;i--){
+      const[mi,mf,d]=cierres[i];
+      if(mes>mf||(mes===mf&&hoy.getDate()>=15)){
+        return{inicio:new Date(anio,mi,1),fin:new Date(anio,mf,d)};
+      }
+    }
+    return{inicio:new Date(anio-1,9,1),fin:new Date(anio-1,11,31)};
+  }
+  if(per==='semestral'){
+    if(periodoInicio==='semestral_ago_feb'){
+      if(mes>=7||mes<=0){
+        const a=mes>=7?anio:anio-1;
+        return{inicio:new Date(a,0,1),fin:new Date(a,5,30)};
+      }
+      return{inicio:new Date(anio-1,6,1),fin:new Date(anio-1,11,31)};
+    } else {
+      if(mes>=8) return{inicio:new Date(anio,0,1),fin:new Date(anio,5,30)};
+      return{inicio:new Date(anio-1,6,1),fin:new Date(anio-1,11,31)};
+    }
+  }
+  if(per==='anual'){
+    if(periodoInicio==='julio'||periodoInicio?.includes('julio')){
+      if(mes>=6) return{inicio:new Date(anio-1,6,1),fin:new Date(anio,5,30)};
+      return{inicio:new Date(anio-2,6,1),fin:new Date(anio-1,5,30)};
+    } else {
+      return{inicio:new Date(anio-1,0,1),fin:new Date(anio-1,11,31)};
+    }
+  }
+  const inicioMes=new Date(anio,mes-1,1);
+  const finMes=new Date(anio,mes,0);
+  return{inicio:inicioMes,fin:finMes};
+}
+
+function formatPeriodoLabel(fechaStr, ind){
+  if(!fechaStr||!ind) {
+    if(!fechaStr) return '—';
+    const f=new Date(fechaStr+'T12:00:00');
+    return f.toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
+  }
+  const rango=getPeriodoRango(ind);
+  const opts={day:'2-digit',month:'short',year:'numeric'};
+  const inicio=rango.inicio.toLocaleDateString('es-AR',opts);
+  const fin=rango.fin.toLocaleDateString('es-AR',opts);
+  return`${inicio} — ${fin}`;
 }
 
 async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
@@ -566,7 +620,7 @@ async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosB
   const unidadId=unidad?.id||'';
   const unidadNombre=unidad?.nombre||'';
   const periodoFijo=getPeriodoFijo(ind);
-  const periodoLabel=formatPeriodoLabel(periodoFijo);
+  const periodoLabel=formatPeriodoLabel(periodoFijo, ind);
   let inputHtml='';
 
   // INDICADORES POR CAMPO

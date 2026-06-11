@@ -491,13 +491,82 @@ async function getValoresPeriodo(claves, periodo, unidadId){
   return result;
 }
 
+function getPeriodoFijo(ind){
+  const hoy=new Date();
+  const anio=hoy.getFullYear();
+  const mes=hoy.getMonth(); // 0-based
+
+  const per=ind.periodicidad;
+  const periodoInicio=ind.periodo_inicio||'';
+
+  // MENSUAL → último día del mes anterior
+  if(per==='mensual'||per==='semanal'){
+    const ultimoMesAnt=new Date(anio,mes,0); // día 0 = último día del mes anterior
+    return ultimoMesAnt.toISOString().split('T')[0];
+  }
+
+  // TRIMESTRAL → último día del trimestre cerrado
+  if(per==='trimestral'){
+    // Trimestres: Q1=31mar, Q2=30jun, Q3=30sep, Q4=31dic
+    const cierres=[[2,31],[5,30],[8,30],[11,31]];
+    // Buscar el último trimestre cerrado
+    for(let i=cierres.length-1;i>=0;i--){
+      const[m,d]=cierres[i];
+      if(mes>m||(mes===m&&hoy.getDate()>=15)){
+        return`${anio}-${String(m+1).padStart(2,'0')}-${d}`;
+      }
+    }
+    // Si estamos en Q1, el último trimestre fue Q4 del año anterior
+    return`${anio-1}-12-31`;
+  }
+
+  // SEMESTRAL
+  if(per==='semestral'){
+    if(periodoInicio==='semestral_ago_feb'){
+      // Períodos: Ene-Jun (vence 15 ago) y Jul-Dic (vence 15 feb)
+      // Si estamos entre ago y ene → período fue Ene-Jun → 30/06
+      // Si estamos entre feb y jul → período fue Jul-Dic año anterior → 31/12
+      if(mes>=7||mes<=0) return`${mes>=7?anio:anio-1}-06-30`;
+      return`${anio-1}-12-31`;
+    } else {
+      // semestral_ene_dic: Ene-Jun (vence 15 sep) y Jul-Dic (vence 15 mar)
+      // Si estamos entre sep y dic → período fue Ene-Jun → 30/06
+      // Si estamos entre mar y ago → período fue Jul-Dic año anterior → 31/12
+      if(mes>=8) return`${anio}-06-30`;
+      return`${anio-1}-12-31`;
+    }
+  }
+
+  // ANUAL
+  if(per==='anual'){
+    if(periodoInicio==='julio'||periodoInicio?.includes('julio')){
+      // Año fiscal Julio-Junio → 30/06 del año en curso o anterior
+      if(mes>=6) return`${anio}-06-30`;
+      return`${anio-1}-06-30`;
+    } else {
+      // Año calendario Enero-Diciembre → 31/12 del año anterior
+      return`${anio-1}-12-31`;
+    }
+  }
+
+  // Default: último día del mes anterior
+  return new Date(anio,mes,0).toISOString().split('T')[0];
+}
+
+function formatPeriodoLabel(fechaStr){
+  if(!fechaStr) return '—';
+  const f=new Date(fechaStr+'T12:00:00');
+  return f.toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'});
+}
+
 async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
   const id=ind.id;
   const alertText=ind.alerta_min!==null?`Alerta si < ${ind.alerta_min}`:ind.alerta_max!==null?`Alerta si > ${ind.alerta_max}`:'';
   const isMulti=['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
   const unidadId=unidad?.id||'';
   const unidadNombre=unidad?.nombre||'';
-  const hoy=new Date().toISOString().split('T')[0];
+  const periodoFijo=getPeriodoFijo(ind);
+  const periodoLabel=formatPeriodoLabel(periodoFijo);
   let inputHtml='';
 
   // INDICADORES POR CAMPO
@@ -521,8 +590,8 @@ async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosB
           </div>
           <div class="inline-row">
             <input type="number" class="form-input" id="val-campo-${id}-${campo.id}" placeholder="${ind.unidad_medida==='hectareas'?'Hectáreas':'Valor'}" step="any" style="flex:1"/>
-            <input type="date" class="form-input" id="fecha-campo-${id}-${campo.id}" value="${hoy}" style="width:auto"/>
-            <button class="btn btn-accent btn-sm" onclick="guardarEntryCampo('${id}','${campo.id}','${unidadId}')">Guardar</button>
+            <div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.4rem .75rem;border-radius:var(--radius);white-space:nowrap">📅 ${periodoLabel}</div>
+            <button class="btn btn-accent btn-sm" onclick="guardarEntryCampo('${id}','${campo.id}','${unidadId}','${periodoFijo}')">Guardar</button>
           </div>
           <div id="msg-campo-${id}-${campo.id}"></div>
         </div>`).join('')}
@@ -542,7 +611,7 @@ async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosB
       <div class="inline-row">
         <input type="number" class="form-input" id="med-${id}-${m.id}" placeholder="kWh" style="width:140px" step="any"/>
         <span style="font-size:.78rem;color:var(--muted)">kWh</span>
-        <button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${unidadId}')">Guardar</button>
+        <button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${unidadId}','${periodoFijo}')">Guardar</button>
       </div>
       <div id="msg-med-${id}-${m.id}"></div>
     </div>`).join('');}
@@ -557,7 +626,7 @@ async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosB
       <div class="inline-row">
         <input type="number" class="form-input" id="rod-km-${id}-${r.id}" placeholder="km actuales" style="width:150px"/>
         <div class="upload-zone" style="flex:1;padding:.4rem .75rem;font-size:.75rem" onclick="document.getElementById('odo-${r.id}').click()">📷 Foto odómetro<input type="file" id="odo-${r.id}" accept="image/*" style="display:none"/></div>
-        <button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${unidadId}')">Guardar</button>
+        <button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${unidadId}','${periodoFijo}')">Guardar</button>
       </div>
       <div id="msg-rod-${id}-${r.id}"></div>
     </div>`).join('');}
@@ -606,14 +675,12 @@ async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosB
     </div>
     ${ind.formula?`<div class="ind-formula">${ind.formula}</div>`:''}
     ${inputHtml}
-    ${!isMulti?`<div style="display:flex;align-items:flex-end;gap:.75rem;margin-top:.75rem;flex-wrap:wrap">
-      <div class="form-group" style="margin:0"><label class="form-label">Período</label>
-        <input type="date" class="form-input" id="fecha-${id}" value="${hoy}" style="width:auto" onchange="onFechaChange('${id}','${unidadId}')"/>
-      </div>
-      ${unidadNombre?`<div style="font-size:.78rem;color:var(--muted);margin-bottom:.2rem">Unidad: <strong>${unidadNombre}</strong></div>`:''}
-      <button class="btn btn-accent" onclick="guardarEntryVars('${id}','${unidadId}')">Guardar</button>
+    ${!isMulti?`<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem;flex-wrap:wrap">
+      <div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.5rem .85rem;border-radius:var(--radius)">📅 Período: <strong>${periodoLabel}</strong></div>
+      ${unidadNombre?`<div style="font-size:.78rem;color:var(--muted)">Unidad: <strong>${unidadNombre}</strong></div>`:''}
+      <button class="btn btn-accent" onclick="guardarEntryVars('${id}','${unidadId}','${periodoFijo}')">Guardar</button>
     </div>
-    <div id="msg-${id}"></div>`:`<div class="form-group" style="margin-top:.75rem"><label class="form-label">Período (aplica a todos)</label><input type="date" class="form-input" id="fecha-${id}" value="${hoy}" style="width:auto"/></div>`}
+    <div id="msg-${id}"></div>`:`<div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.5rem .85rem;border-radius:var(--radius);margin-top:.75rem;display:inline-block">📅 Período: <strong>${periodoLabel}</strong></div>`}
   </div>`;
 }
 
@@ -671,11 +738,10 @@ async function calcVars(indId){
 }
 
 // Guardar entry con variables individuales
-async function guardarEntryVars(indId, unidadId){
+async function guardarEntryVars(indId, unidadId, periodoFijo){
   const msgEl=document.getElementById('msg-'+indId);
   if(msgEl){msgEl.textContent='Guardando...';msgEl.className='form-hint';}
-  const fecha=document.getElementById('fecha-'+indId)?.value;
-  if(!fecha){if(msgEl){msgEl.textContent='Seleccioná una fecha.';msgEl.className='msg-err';}return;}
+  if(!periodoFijo){if(msgEl){msgEl.textContent='Error: período no definido.';msgEl.className='msg-err';}return;}
 
   const vars=await getVariables(indId);
   const inputVars=vars.filter(v=>!v.es_calculado);
@@ -685,7 +751,7 @@ async function guardarEntryVars(indId, unidadId){
   if(vars.length===0){
     const valEl=document.getElementById('val-'+indId);
     const valor=parseFloat(valEl?.value)||null;
-    const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,periodo_fecha:fecha});
+    const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,periodo_fecha:periodoFijo});
     if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
     else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);}
     return;
@@ -706,38 +772,33 @@ async function guardarEntryVars(indId, unidadId){
     }catch(e){}
   }
 
-  // Insertar entry
   const{data:entry,error:e1}=await sb.from('entries').insert({
     indicador_id:indId,unidad_negocio_id:unidadId||null,
-    user_id:currentUser.id,valor:valorFinal,periodo_fecha:fecha
+    user_id:currentUser.id,valor:valorFinal,periodo_fecha:periodoFijo
   }).select().single();
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
 
-  // Guardar variables individuales
   const entryVars=inputVars.map(v=>({entry_id:entry.id,variable_id:v.id,clave:v.clave,valor:vals[v.clave]}));
   if(calcVar) entryVars.push({entry_id:entry.id,variable_id:calcVar.id,clave:calcVar.clave,valor:valorFinal||0});
   await sb.from('entry_variables').insert(entryVars);
 
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
   document.getElementById('ind-card-'+indId)?.classList.add('done');
-  // Limpiar cache de valores para que el pre-llenado se actualice
   _valCache={};
   setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
 }
 
 function handleFile(id,input){const f=input.files[0];if(f){const el=document.getElementById('file-name-'+id);if(el)el.textContent='✓ '+f.name;}}
 
-async function guardarEntryCampo(indId,campoId,unidadId){
+async function guardarEntryCampo(indId,campoId,unidadId,periodoFijo){
   const inp=document.getElementById(`val-campo-${indId}-${campoId}`);
-  const fechaEl=document.getElementById(`fecha-campo-${indId}-${campoId}`);
   const msgEl=document.getElementById(`msg-campo-${indId}-${campoId}`);
   const valor=parseFloat(inp?.value);
-  const fecha=fechaEl?.value;
   if(!valor){if(msgEl){msgEl.textContent='Ingresá un valor.';msgEl.className='msg-err';}return;}
-  if(!fecha){if(msgEl){msgEl.textContent='Seleccioná una fecha.';msgEl.className='msg-err';}return;}
+  if(!periodoFijo){if(msgEl){msgEl.textContent='Error: período no definido.';msgEl.className='msg-err';}return;}
   const{error}=await sb.from('entries').insert({
     indicador_id:indId,campo_id:campoId,unidad_negocio_id:unidadId||null,
-    user_id:currentUser.id,valor,periodo_fecha:fecha
+    user_id:currentUser.id,valor,periodo_fecha:periodoFijo
   });
   if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
   else{
@@ -747,30 +808,28 @@ async function guardarEntryCampo(indId,campoId,unidadId){
   }
 }
 
-async function guardarEntry(indId,unidadId){
-  return guardarEntryVars(indId,unidadId);
+async function guardarEntry(indId,unidadId,periodoFijo){
+  return guardarEntryVars(indId,unidadId,periodoFijo);
 }
 
-async function guardarMedidor(indId,medidorId,unidadId){
+async function guardarMedidor(indId,medidorId,unidadId,periodoFijo){
   const inp=document.getElementById(`med-${indId}-${medidorId}`);
   const msgEl=document.getElementById(`msg-med-${indId}-${medidorId}`);
-  const fecha=document.getElementById('fecha-'+indId)?.value||new Date().toISOString().split('T')[0];
   const kwh=parseFloat(inp?.value);
   if(!kwh){if(msgEl){msgEl.textContent='Ingresá el valor kWh.';msgEl.className='msg-err';}return;}
-  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor:kwh,periodo_fecha:fecha}).select().single();
+  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor:kwh,periodo_fecha:periodoFijo}).select().single();
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
   await sb.from('consumo_medidores').insert({entry_id:entry.id,medidor_id:medidorId,kwh});
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
   if(inp)inp.value='';setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
 }
 
-async function guardarKm(indId,rodadoId,unidadId){
+async function guardarKm(indId,rodadoId,unidadId,periodoFijo){
   const inp=document.getElementById(`rod-km-${indId}-${rodadoId}`);
   const msgEl=document.getElementById(`msg-rod-${indId}-${rodadoId}`);
-  const fecha=document.getElementById('fecha-'+indId)?.value||new Date().toISOString().split('T')[0];
   const km=parseFloat(inp?.value);
   if(!km){if(msgEl){msgEl.textContent='Ingresá los km.';msgEl.className='msg-err';}return;}
-  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor:km,periodo_fecha:fecha}).select().single();
+  const{data:entry,error:e1}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor:km,periodo_fecha:periodoFijo}).select().single();
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
   await sb.from('km_rodados').insert({entry_id:entry.id,rodado_id:rodadoId,km});
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}

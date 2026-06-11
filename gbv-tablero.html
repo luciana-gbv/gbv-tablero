@@ -1208,15 +1208,37 @@ async function renderPuestos(){
 // ── HISTÓRICOS ──
 async function renderHistorico(){
   const main=document.getElementById('main-content');
+  const anioActual=new Date().getFullYear();
+  const anios=[anioActual, anioActual-1, anioActual-2, anioActual-3];
+  const esDirectivo=['programador','directorio','coo'].includes(currentProfile.rol);
+
   main.innerHTML=`
     <div class="section-heading">Históricos</div>
     <div class="section-sub">Evolución de indicadores en el tiempo</div>
+
+    ${esDirectivo?`
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title">📄 Informe anual completo</div>
+      <div style="display:flex;align-items:flex-end;gap:1rem;flex-wrap:wrap">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Año</label>
+          <select class="form-select" id="informe-anio" style="width:auto">
+            ${anios.map(a=>`<option value="${a}">${a}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-accent" onclick="descargarInformePDF()">⬇ Descargar PDF</button>
+        <button class="btn" onclick="descargarInformeExcel()">⬇ Descargar Excel</button>
+      </div>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:.6rem">Incluye todos los indicadores del año seleccionado, organizados por categoría. El Excel se puede abrir directamente en Google Sheets.</div>
+    </div>`:''}
+
     <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Buscar indicador</div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Indicador</label>
           <select class="form-select" id="hist-ind">
             <option value="">— Seleccioná —</option>
-            ${allIndicadores.map(i=>`<option value="${i.id}">${i.nombre}</option>`).join('')}
+            ${allIndicadores.map(i=>`<option value="${i.id}">${CAT_LABELS[i.categoria]||i.categoria} · ${i.nombre}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label class="form-label">Campo (opcional)</label>
@@ -1387,6 +1409,131 @@ async function loadHistVariables(indId,entries){
       </tr>`;
     }).join('')}</tbody>
   </table></div>`;
+}
+
+async function getEntriesAnio(anio){
+  const{data}=await sb.from('entries')
+    .select('*,indicadores(nombre,categoria,unidad_medida,alerta_min,alerta_max),unidades_negocio(nombre),campos(nombre),profiles(nombre,apellido)')
+    .gte('periodo_fecha',`${anio}-01-01`)
+    .lte('periodo_fecha',`${anio}-12-31`)
+    .order('periodo_fecha',{ascending:false});
+  return data||[];
+}
+
+async function descargarInformePDF(){
+  const anio=document.getElementById('informe-anio').value;
+  const btn=event.target;
+  btn.textContent='Generando...';btn.disabled=true;
+
+  const entries=await getEntriesAnio(anio);
+
+  // Agrupar por categoría
+  const porCat={};
+  entries.forEach(e=>{
+    const cat=e.indicadores?.categoria||'sin_categoria';
+    if(!porCat[cat]) porCat[cat]=[];
+    porCat[cat].push(e);
+  });
+
+  // Construir HTML para imprimir
+  const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+  <title>GBV · Informe Anual ${anio}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:11px;color:#1A1916;margin:2cm}
+    h1{font-size:22px;color:#2D5A3D;margin-bottom:4px}
+    h2{font-size:13px;color:#2D5A3D;margin:20px 0 6px;border-bottom:1px solid #E2DDD6;padding-bottom:4px;text-transform:uppercase;letter-spacing:.05em}
+    table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:10px}
+    th{background:#F5F3EE;text-align:left;padding:5px 8px;border:1px solid #E2DDD6;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:#7A7570}
+    td{padding:5px 8px;border:1px solid #E2DDD6;vertical-align:top}
+    .ok{color:#2D5A3D;font-weight:500}.warn{color:#C0392B;font-weight:500}
+    .sub{font-size:9px;color:#7A7570}
+    .header{display:flex;justify-content:space-between;margin-bottom:20px;align-items:flex-end}
+    .fecha{font-size:10px;color:#7A7570}
+    @media print{body{margin:1.5cm}}
+  </style></head><body>
+  <div class="header">
+    <div><h1>GBV · Informe Anual ${anio}</h1>
+    <div class="fecha">Generado el ${new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'})} · ${entries.length} registros</div></div>
+  </div>
+  ${Object.entries(porCat).map(([cat,rows])=>`
+    <h2>${CAT_LABELS[cat]||cat}</h2>
+    <table><thead><tr>
+      <th>Indicador</th><th>Período</th><th>Valor</th><th>Unidad/Campo</th><th>Cargado por</th><th>Estado</th>
+    </tr></thead><tbody>
+    ${rows.map(e=>{
+      const amin=e.indicadores?.alerta_min;
+      const amax=e.indicadores?.alerta_max;
+      let estado='Normal';let cls='ok';
+      if(e.valor!==null&&amin!==null&&e.valor<amin){estado=`Bajo mín. (${amin})`;cls='warn';}
+      else if(e.valor!==null&&amax!==null&&e.valor>amax){estado=`Sobre máx. (${amax})`;cls='warn';}
+      return`<tr>
+        <td>${e.indicadores?.nombre||'—'}</td>
+        <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
+        <td><strong>${e.valor!==null?e.valor:'—'}</strong> <span class="sub">${e.indicadores?.unidad_medida||''}</span></td>
+        <td>${e.unidades_negocio?.nombre||e.campos?.nombre||'—'}</td>
+        <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
+        <td class="${cls}">${estado}</td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`).join('')}
+  </body></html>`;
+
+  // Abrir ventana de impresión
+  const w=window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(()=>{w.print();},500);
+
+  btn.textContent='⬇ Descargar PDF';btn.disabled=false;
+}
+
+async function descargarInformeExcel(){
+  const anio=document.getElementById('informe-anio').value;
+  const btn=event.target;
+  btn.textContent='Generando...';btn.disabled=true;
+
+  const entries=await getEntriesAnio(anio);
+
+  // Construir CSV (compatible con Excel y Google Sheets)
+  const BOM='\uFEFF';
+  const sep=',';
+  const filas=[
+    ['GBV · Informe Anual '+anio],
+    ['Generado el '+new Date().toLocaleDateString('es-AR')],
+    [],
+    ['Categoría','Indicador','Período','Valor','Unidad de medida','Unidad/Campo','Cargado por','Estado','Alerta mín','Alerta máx']
+  ];
+
+  entries.forEach(e=>{
+    const amin=e.indicadores?.alerta_min;
+    const amax=e.indicadores?.alerta_max;
+    let estado='Normal';
+    if(e.valor!==null&&amin!==null&&e.valor<amin) estado='Bajo mínimo';
+    else if(e.valor!==null&&amax!==null&&e.valor>amax) estado='Sobre máximo';
+    filas.push([
+      CAT_LABELS[e.indicadores?.categoria]||e.indicadores?.categoria||'—',
+      e.indicadores?.nombre||'—',
+      e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—',
+      e.valor!==null?e.valor:'',
+      e.indicadores?.unidad_medida||'',
+      e.unidades_negocio?.nombre||e.campos?.nombre||'—',
+      (e.profiles?.nombre||'')+' '+(e.profiles?.apellido||''),
+      estado,
+      amin!==null?amin:'',
+      amax!==null?amax:''
+    ]);
+  });
+
+  const csv=BOM+filas.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(sep)).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=`GBV_Informe_${anio}.csv`;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(url);
+
+  btn.textContent='⬇ Descargar Excel';btn.disabled=false;
 }
 
 // ── ADMIN ──

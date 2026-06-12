@@ -199,17 +199,17 @@ async function initApp(user){
 
 async function mostrarAlertas(){
   const hoy=new Date();
-  const maniana=new Date(hoy); maniana.setDate(maniana.getDate()+1);
   const anio=hoy.getFullYear();
+  const mes=hoy.getMonth()+1; // 1-based
+  const dia=hoy.getDate();
 
-  // Cargar entries del año
+  // ── Alertas de indicadores ──
   const{data:entries}=await sb.from('entries')
     .select('indicador_id,periodo_fecha')
     .gte('periodo_fecha',`${anio}-01-01`)
     .lte('periodo_fecha',`${anio}-12-31`);
   const cargados=new Set((entries||[]).map(e=>e.indicador_id+'_'+e.periodo_fecha));
 
-  // Calcular vencimientos
   const vencidos=[], manana=[], enSemana=[];
   allIndicadores.forEach(ind=>{
     const fechas=getVencimientosAnio(ind,anio);
@@ -223,22 +223,56 @@ async function mostrarAlertas(){
     });
   });
 
-  // Para directorio/COO: ver también quién no cumplió
-  let incumplidoresHtml='';
-  if(['programador','directorio','coo'].includes(currentProfile.rol)&&vencidos.length>0){
-    incumplidoresHtml=`<button onclick="renderTab('calendario')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #8B1C1C;background:transparent;color:#8B1C1C;cursor:pointer;margin-left:.5rem">Ver en calendario →</button>`;
+  // ── Alertas de RRHH ──
+  // Períodos: semana del 1° de junio (días 1-7) y semana del 1° de diciembre (días 1-7)
+  const esSemanJunio = mes===6 && dia<=7;
+  const esSemanaDict = mes===12 && dia<=7;
+  const esSemanaCercaJunio = (mes===5 && dia>=25) || (mes===6 && dia<=7);
+  const esSemanaCercaDic = (mes===11 && dia>=25) || (mes===12 && dia<=7);
+  const periodoRRHH = mes<=6 ? `junio_${anio}` : `diciembre_${anio}`;
+  const periodoLabel = mes<=6 ? `Junio ${anio}` : `Diciembre ${anio}`;
+
+  let alertaRRHH = null;
+  if(esSemanaCercaJunio || esSemanaCercaDic){
+    // Ver cuántas evaluaciones pendientes tiene este usuario
+    const{data:evalRel}=await sb.from('evaluadores_empleado')
+      .select('empleado_id').eq('evaluador_user_id',currentUser.id).eq('activo',true);
+    const empIds=(evalRel||[]).map(e=>e.empleado_id);
+
+    if(empIds.length>0){
+      const{data:evalsHechas}=await sb.from('evaluaciones')
+        .select('empleado_id').eq('evaluador_user_id',currentUser.id)
+        .eq('periodo',periodoRRHH).neq('estado','borrador');
+      const hechasIds=new Set((evalsHechas||[]).map(e=>e.empleado_id));
+      const pendientesRRHH=empIds.filter(id=>!hechasIds.has(id)).length;
+
+      if(pendientesRRHH>0){
+        const urgente=esSemanJunio||esSemanaDict;
+        alertaRRHH={pendientes:pendientesRRHH, urgente, label:periodoLabel};
+      }
+    }
   }
 
-  // Construir banner
+  // Para directorio/COO: ver si hay evaluaciones sin aprobar
+  let sinAprobar=0;
+  if(['programador','directorio','coo'].includes(currentProfile.rol)&&(esSemanaCercaJunio||esSemanaCercaDic)){
+    const{data:enviadas}=await sb.from('evaluaciones')
+      .select('id').eq('periodo',periodoRRHH).eq('estado','enviado');
+    sinAprobar=(enviadas||[]).length;
+  }
+
+  // ── Construir banner ──
   const alertaDiv=document.getElementById('alerta-banner');
   if(!alertaDiv) return;
 
   let html='';
+
+  // Alertas de indicadores
   if(vencidos.length>0){
     html+=`<div class="alert alert-danger" style="margin:0 1.5rem;margin-top:.75rem">
       ⚠ <strong>${vencidos.length} indicador${vencidos.length>1?'es':''} vencido${vencidos.length>1?'s':''} sin cargar</strong>
       — ${vencidos.slice(0,3).map(v=>v.nombre).join(', ')}${vencidos.length>3?` y ${vencidos.length-3} más`:''}
-      ${incumplidoresHtml}
+      <button onclick="renderTab('calendario')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #8B1C1C;background:transparent;color:#8B1C1C;cursor:pointer;margin-left:.5rem">Ver →</button>
     </div>`;
   }
   if(manana.length>0){
@@ -254,6 +288,23 @@ async function mostrarAlertas(){
       <button onclick="renderTab('calendario')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #1A3A5C;background:transparent;color:#1A3A5C;cursor:pointer;margin-left:.5rem">Ver →</button>
     </div>`;
   }
+
+  // Alertas de RRHH
+  if(alertaRRHH){
+    html+=`<div class="alert ${alertaRRHH.urgente?'alert-danger':'alert-warning'}" style="margin:0 1.5rem;margin-top:.5rem">
+      👥 ${alertaRRHH.urgente?'⚠':'⏰'} <strong>Evaluaciones de desempeño · ${alertaRRHH.label}</strong> — 
+      Tenés <strong>${alertaRRHH.pendientes} evaluación${alertaRRHH.pendientes>1?'es':''} pendiente${alertaRRHH.pendientes>1?'s':''}</strong> sin enviar
+      <button onclick="renderTab('rrhh')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid ${alertaRRHH.urgente?'#8B1C1C':'#7A5A00'};background:transparent;color:${alertaRRHH.urgente?'#8B1C1C':'#7A5A00'};cursor:pointer;margin-left:.5rem">Ir a RRHH →</button>
+    </div>`;
+  }
+
+  if(sinAprobar>0){
+    html+=`<div class="alert alert-warning" style="margin:0 1.5rem;margin-top:.5rem">
+      👥 <strong>${sinAprobar} evaluación${sinAprobar>1?'es':''} enviada${sinAprobar>1?'s':''}</strong> esperan aprobación del Directorio
+      <button onclick="renderTab('rrhh')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #7A5A00;background:transparent;color:#7A5A00;cursor:pointer;margin-left:.5rem">Aprobar →</button>
+    </div>`;
+  }
+
   alertaDiv.innerHTML=html;
 }
 

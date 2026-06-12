@@ -948,15 +948,13 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
       <div id="msg-rod-${id}-${r.id}"></div>
     </div>`).join('');}
 
-  // INDICADORES CON VARIABLES DEFINIDAS EN BD
+  // INDICADORES CON VARIABLES
   }else{
-    const vars=await getVariables(id);
+    const vars=varsCache[id]||[];
     if(vars.length>0){
       const inputVars=vars.filter(v=>!v.es_calculado);
       const calcVar=vars.find(v=>v.es_calculado);
-      // Buscar valores pre-cargados para el período actual
-      const claves=inputVars.map(v=>v.clave);
-      const preCargados=await getValoresPeriodo(claves, hoy, unidadId);
+      const preCargados=periodoValsCache||{};
 
       inputHtml=`
         <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">

@@ -1239,11 +1239,11 @@ async function renderInmuebles(){
             ${meses.map(m=>`<td style="font-size:10px;color:var(--muted);text-align:center;padding:0 1px 6px;min-width:40px">${m.label}</td>`).join('')}
           </tr></thead>
           <tbody>
-            ${inm.slice(0,15).map(inm_item=>{
+            ${inm.map(inm_item=>{
               const contrato=contratosPorInmueble[inm_item.id];
               const alertaInm=alrt.find(a=>a.inmueble_id===inm_item.id&&a.tipo==='impago');
               return`<tr>
-                <td style="font-size:12px;color:var(--text);padding:2px 12px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${inm_item.direccion}">${inm_item.direccion}</td>
+                <td style="font-size:11px;color:var(--text);padding:2px 12px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${inm_item.direccion}">${inm_item.direccion}</td>
                 ${meses.map(m=>{
                   let color='var(--bg)';let border='0.5px solid var(--border)';
                   if(contrato){
@@ -1255,14 +1255,21 @@ async function renderInmuebles(){
                       border='none';
                     }
                   }
-                  return`<td style="padding:2px 1px"><div style="height:22px;border-radius:4px;background:${color};border:${border}"></div></td>`;
+                  return`<td style="padding:2px 1px"><div style="height:20px;border-radius:3px;background:${color};border:${border}"></div></td>`;
                 }).join('')}
               </tr>`;
             }).join('')}
           </tbody>
         </table>
       </div>
-      ${inm.length>15?`<div style="font-size:.78rem;color:var(--muted);margin-top:.5rem">Mostrando 15 de ${inm.length} inmuebles</div>`:''}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Distribución de superficie</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:center">
+        <div style="position:relative;height:200px"><canvas id="chart-inmuebles-torta"></canvas></div>
+        <div id="torta-leyenda" style="display:flex;flex-direction:column;gap:.5rem"></div>
+      </div>
     </div>
 
     <div class="tab-row">
@@ -1273,6 +1280,53 @@ async function renderInmuebles(){
     <div id="inm-panel">${renderInmActual(inm,contratosPorInmueble,alrt)}</div>
   `;
   window._inmData={inm,contratosPorInmueble,alrt,cont};
+
+  // Renderizar gráfico de torta de superficies
+  setTimeout(()=>{
+    const ctx=document.getElementById('chart-inmuebles-torta');
+    if(!ctx||typeof Chart==='undefined') return;
+
+    const metrosOcupados=inm.filter(i=>contratosPorInmueble[i.id]&&i.metros).reduce((a,i)=>a+(i.metros||0),0);
+    const metrosVacios=inm.filter(i=>!contratosPorInmueble[i.id]&&i.metros).reduce((a,i)=>a+(i.metros||0),0);
+    const sinDatos=inm.filter(i=>!i.metros).length;
+
+    new Chart(ctx,{
+      type:'doughnut',
+      data:{
+        labels:['Alquilados','Desocupados'],
+        datasets:[{
+          data:[metrosOcupados,metrosVacios],
+          backgroundColor:['#2D5A3D','#E2DDD6'],
+          borderColor:['#fff','#fff'],
+          borderWidth:3
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.label}: ${c.parsed.toLocaleString('es-AR')} m²`}}}
+      }
+    });
+
+    const leyEl=document.getElementById('torta-leyenda');
+    if(leyEl){
+      const total=metrosOcupados+metrosVacios;
+      leyEl.innerHTML=`
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <span style="width:12px;height:12px;background:#2D5A3D;border-radius:3px;flex-shrink:0;display:inline-block"></span>
+          <div><div style="font-size:.85rem;font-weight:500;color:var(--text)">Alquilados</div>
+          <div style="font-size:.78rem;color:var(--muted)">${metrosOcupados.toLocaleString('es-AR')} m² · ${total?Math.round(metrosOcupados/total*100):0}%</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <span style="width:12px;height:12px;background:#E2DDD6;border:0.5px solid #B4B2A9;border-radius:3px;flex-shrink:0;display:inline-block"></span>
+          <div><div style="font-size:.85rem;font-weight:500;color:var(--text)">Desocupados</div>
+          <div style="font-size:.78rem;color:var(--muted)">${metrosVacios.toLocaleString('es-AR')} m² · ${total?Math.round(metrosVacios/total*100):0}%</div></div>
+        </div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:.25rem;padding-top:.5rem;border-top:0.5px solid var(--border)">
+          Total con superficie: ${total.toLocaleString('es-AR')} m²<br>
+          Sin datos de superficie: ${sinDatos} inmuebles
+        </div>`;
+    }
+  },200);
 }
 
 function renderInmActual(inm,contratosPorInmueble,alrt){

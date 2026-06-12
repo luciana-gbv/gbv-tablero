@@ -566,14 +566,17 @@ async function loadIndicatorsPanel(){
   _varCache={};
   _allVarsLoaded=false;
   _periodoValsCache={};
-  // Precargar variables y valores del período en paralelo
-  const periodoFijoRef=getPeriodoFijo(filtered[0]);
+
+  // Precargar variables y valores del período en paralelo — solo 2 consultas
+  const periodoRef=filtered.length>0?getPeriodoFijo(filtered[0]):'';
   await Promise.all([
     preloadVariables(filtered),
-    preloadValoresPeriodo(periodoFijoRef, selectedUnidad)
+    preloadValoresPeriodo(periodoRef, selectedUnidad)
   ]);
-  const cards=await Promise.all(filtered.map(ind=>renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs)));
-  panel.innerHTML=cards.join('');
+
+  const periodoValsCache=_periodoValsCache[periodoRef+'_'+selectedUnidad]||{};
+  // Renderizar de forma síncrona — sin más consultas
+  panel.innerHTML=filtered.map(ind=>renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,_varCache,periodoValsCache)).join('');
 }
 
 // Cache de variables por indicador y valores pre-cargados por período
@@ -747,7 +750,131 @@ function formatPeriodoLabel(fechaStr, ind){
   return`${inicio} — ${fin}`;
 }
 
-async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs){
+function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCache,periodoValsCache){
+  const id=ind.id;
+  const alertText=ind.alerta_min!==null?`Alerta si < ${ind.alerta_min}`:ind.alerta_max!==null?`Alerta si > ${ind.alerta_max}`:'';
+  const isMulti=['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
+  const unidadId=unidad?.id||'';
+  const unidadNombre=unidad?.nombre||'';
+  const periodoFijo=getPeriodoFijo(ind);
+  const periodoLabel=formatPeriodoLabel(periodoFijo,ind);
+  let inputHtml='';
+
+  // INDICADORES POR CAMPO
+  if(ind.por_campo){
+    const camposUnidad=allCampos.filter(c=>c.unidad_negocio_id===unidadId);
+    return`<div class="ind-card" id="ind-card-${id}">
+      <div class="ind-name">${ind.nombre}</div>
+      <div class="ind-meta">
+        <span class="pill">${ind.periodicidad}</span>
+        <span class="pill">${ind.unidad_medida}</span>
+        ${alertText?`<span class="pill pill-alert">${alertText}</span>`:''}
+        <span class="pill" style="background:#E8F0F8;color:#1A3A5C">Por campo</span>
+      </div>
+      ${ind.formula?`<div class="ind-formula">${ind.formula}</div>`:''}
+      ${camposUnidad.length===0?`<div class="alert alert-info">No hay campos cargados para esta unidad.</div>`:
+        camposUnidad.map(campo=>`
+        <div class="sub-entry-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+            <div class="sub-entry-title">📍 ${campo.nombre}</div>
+            ${campo.hectareas?`<span style="font-size:.75rem;color:var(--muted)">${campo.hectareas.toLocaleString('es-AR')} ha totales</span>`:''}
+          </div>
+          <div class="inline-row">
+            <input type="number" class="form-input" id="val-campo-${id}-${campo.id}" placeholder="Valor" step="any" style="flex:1"/>
+            <div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.4rem .75rem;border-radius:var(--radius);white-space:nowrap">📅 ${periodoLabel}</div>
+            <button class="btn btn-accent btn-sm" onclick="guardarEntryCampo('${id}','${campo.id}','${unidadId}','${periodoFijo}')">Guardar</button>
+          </div>
+          <div id="msg-campo-${id}-${campo.id}"></div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  // ADJUNTOS
+  if(ind.nombre==='Planilla de hacienda'||ind.nombre==='Inventario stocks'||(ind.requiere_adjunto&&!isMulti)){
+    inputHtml=`<div class="upload-zone" onclick="document.getElementById('file-${id}').click()">↑ Adjuntar archivo (PDF, Excel, imagen)<input type="file" id="file-${id}" style="display:none" onchange="handleFile('${id}',this)"/></div><div id="file-name-${id}" class="form-hint"></div>`;
+
+  // MEDIDORES
+  }else if(ind.nombre==='Consumos de luz por medidor'){
+    if(medidores.length===0){inputHtml=`<div class="alert alert-info">No hay medidores cargados para esta unidad.</div>`;}
+    else{inputHtml=medidores.map(m=>`<div class="sub-entry-card">
+      <div class="sub-entry-title">Medidor ${m.numero_medidor}</div>
+      <div class="sub-entry-meta">${m.empresa||''}</div>
+      <div class="inline-row">
+        <input type="number" class="form-input" id="med-${id}-${m.id}" placeholder="kWh" style="width:140px" step="any"/>
+        <span style="font-size:.78rem;color:var(--muted)">kWh</span>
+        <button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${unidadId}','${periodoFijo}')">Guardar</button>
+      </div>
+      <div id="msg-med-${id}-${m.id}"></div>
+    </div>`).join('');}
+
+  // RODADOS
+  }else if(ind.nombre==='Kilometraje por camioneta'){
+    const lista=rodados.length>0?rodados:rodadosBsAs;
+    if(lista.length===0){inputHtml=`<div class="alert alert-info">No hay rodados cargados para esta unidad.</div>`;}
+    else{inputHtml=lista.map(r=>`<div class="sub-entry-card">
+      <div class="sub-entry-title">${r.patente} ${r.campos?.nombre?`<span style="font-size:.72rem;color:var(--muted)">· ${r.campos.nombre}</span>`:''}</div>
+      <div class="sub-entry-meta">${r.descripcion||''}</div>
+      <div class="inline-row">
+        <input type="number" class="form-input" id="rod-km-${id}-${r.id}" placeholder="km actuales" style="width:150px"/>
+        <div class="upload-zone" style="flex:1;padding:.4rem .75rem;font-size:.75rem" onclick="document.getElementById('odo-${r.id}').click()">📷 Foto odómetro<input type="file" id="odo-${r.id}" accept="image/*" style="display:none"/></div>
+        <button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${unidadId}','${periodoFijo}')">Guardar</button>
+      </div>
+      <div id="msg-rod-${id}-${r.id}"></div>
+    </div>`).join('');}
+
+  // INDICADORES CON VARIABLES
+  }else{
+    const vars=varsCache[id]||[];
+    if(vars.length>0){
+      const inputVars=vars.filter(v=>!v.es_calculado);
+      const calcVar=vars.find(v=>v.es_calculado);
+      const preCargados=periodoValsCache||{};
+
+      inputHtml=`
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+          ${inputVars.map(v=>{
+            const preval=preCargados[v.clave];
+            const bloqueado=preval!==undefined;
+            const esHectareas=v.clave==='hectareas_campo';
+            const valorHa=esHectareas?hasTotal:null;
+            const valorFinal=bloqueado?preval:esHectareas&&valorHa?valorHa:'';
+            const estaBloqueado=bloqueado||(esHectareas&&valorHa>0);
+            return`<div class="form-group">
+              <label class="form-label">${v.nombre} ${v.unidad?`<span style="color:var(--muted);font-weight:400">(${v.unidad})</span>`:''}
+              ${estaBloqueado?`<span style="font-size:.68rem;color:var(--success);margin-left:.25rem">${esHectareas&&!bloqueado?'✓ automático':'✓ pre-cargado'}</span>`:''}</label>
+              <input type="number" class="form-input"
+                id="var-${id}-${v.clave}"
+                placeholder="0"
+                value="${valorFinal}"
+                ${estaBloqueado?`style="background:#F4FAF6;border-color:#A8D5B5" readonly title="${esHectareas&&!bloqueado?`Hectáreas de ${unidadNombre}`:' Ya cargado para este período'}"` :''}
+                step="any"
+                oninput="calcVars('${id}')"/>
+            </div>`;
+          }).join('')}
+        </div>
+        ${calcVar?`<div id="calc-result-${id}" style="margin-top:.5rem"></div>`:''}`;
+    }else{
+      inputHtml=`<div class="form-group"><label class="form-label">Valor</label><input type="number" class="form-input" id="val-${id}" placeholder="Ingresá el valor" step="any"/></div>`;
+    }
+  }
+
+  return`<div class="ind-card" id="ind-card-${id}">
+    <div class="ind-name">${ind.nombre}</div>
+    <div class="ind-meta">
+      <span class="pill">${ind.periodicidad}</span>
+      <span class="pill">${ind.unidad_medida}</span>
+      ${alertText?`<span class="pill pill-alert">${alertText}</span>`:''}
+    </div>
+    ${ind.formula?`<div class="ind-formula">${ind.formula}</div>`:''}
+    ${inputHtml}
+    ${!isMulti?`<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem;flex-wrap:wrap">
+      <div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.5rem .85rem;border-radius:var(--radius)">📅 Período: <strong>${periodoLabel}</strong></div>
+      ${unidadNombre?`<div style="font-size:.78rem;color:var(--muted)">Unidad: <strong>${unidadNombre}</strong></div>`:''}
+      <button class="btn btn-accent" onclick="guardarEntryVars('${id}','${unidadId}','${periodoFijo}')">Guardar</button>
+    </div>
+    <div id="msg-${id}"></div>`:`<div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.5rem .85rem;border-radius:var(--radius);margin-top:.75rem;display:inline-block">📅 Período: <strong>${periodoLabel}</strong></div>`}
+  </div>`;
+}
   const id=ind.id;
   const alertText=ind.alerta_min!==null?`Alerta si < ${ind.alerta_min}`:ind.alerta_max!==null?`Alerta si > ${ind.alerta_max}`:'';
   const isMulti=['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);

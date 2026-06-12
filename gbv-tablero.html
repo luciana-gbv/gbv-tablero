@@ -875,6 +875,8 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
     <div id="msg-${id}"></div>`:`<div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.5rem .85rem;border-radius:var(--radius);margin-top:.75rem;display:inline-block">📅 Período: <strong>${periodoLabel}</strong></div>`}
   </div>`;
 }
+
+function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCache,periodoValsCache){
   const id=ind.id;
   const alertText=ind.alerta_min!==null?`Alerta si < ${ind.alerta_min}`:ind.alerta_max!==null?`Alerta si > ${ind.alerta_max}`:'';
   const isMulti=['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);

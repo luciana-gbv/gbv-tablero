@@ -1407,7 +1407,7 @@ function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo){
             <div style="display:flex;justify-content:space-between;font-weight:500;margin-top:4px"><span style="color:var(--muted)">Bono calculado</span><span style="color:var(--accent)">$${miEval.bono_calculado.toLocaleString('es-AR')}</span></div>
           </div>`:''}
         <button class="btn btn-accent btn-sm" style="width:100%" onclick="abrirEvaluacion('${emp.id}')">
-          ${estado==='pendiente'?'Iniciar evaluación':estado==='borrador'?'Continuar evaluación':'Ver evaluación'}
+          ${estado==='pendiente'?'Iniciar evaluación':estado==='borrador'?'Continuar evaluación':estado==='enviado'?'Ver evaluación enviada':'Ver evaluación aprobada'}
         </button>
       </div>`;
     }).join('')}
@@ -1518,9 +1518,27 @@ async function rectificarBono(empleadoId, periodo, montoOriginal){
 }
 
 async function abrirEvaluacion(empleadoId){
-  const{misEmpleados,evalsPorEmpleado,periodo}=window._rrhhData;
-  const emp=misEmpleados.find(e=>e.id===empleadoId);
+  const{misEmpleados,todosEmpleados,evalsPorEmpleado,periodo}=window._rrhhData;
+  // Buscar en todos los empleados (directorio puede ver todos)
+  const emp=(todosEmpleados||misEmpleados).find(e=>e.id===empleadoId);
   if(!emp) return;
+
+  // Verificar que el usuario actual sea evaluador de este empleado (o programador)
+  const esProgramador=currentProfile.rol==='programador';
+  if(!esProgramador){
+    const{data:rel}=await sb.from('evaluadores_empleado')
+      .select('id').eq('empleado_id',empleadoId).eq('evaluador_user_id',currentUser.id).eq('activo',true);
+    if(!rel||rel.length===0){
+      const panel=document.getElementById('rrhh-panel');
+      panel.innerHTML=`
+        <button class="btn btn-sm" onclick="renderRRHH()" style="margin-bottom:1rem">← Volver</button>
+        <div class="card"><div class="locked">
+          <div style="font-size:2rem;margin-bottom:.75rem">🔒</div>
+          <div style="font-size:.85rem">No estás asignado como evaluador de <strong>${emp.nombre} ${emp.apellido||''}</strong>.<br>Solo podés ver el estado de esta evaluación.</div>
+        </div></div>`;
+      return;
+    }
+  }
   const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
   const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
   const objetivos=OBJETIVOS_PUESTO[emp.puesto_codigo]||[];

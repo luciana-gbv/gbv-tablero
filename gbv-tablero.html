@@ -263,6 +263,7 @@ const TAB_DEFS=[
   {id:'calendario',label:'Calendario',roles:['programador','directorio','coo','operativo','encargado_campo']},
   {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo']},
   {id:'inmuebles',label:'Inmuebles',roles:['programador','directorio','coo','operativo']},
+  {id:'rrhh',label:'RRHH',roles:['programador','directorio','coo','operativo','encargado_campo']},
   {id:'puestos',label:'Puestos',roles:['programador','directorio','coo']},
   {id:'historico',label:'Históricos',roles:['programador','directorio','coo','operativo']},
   {id:'admin',label:'Administración',roles:['programador','coo']},
@@ -291,6 +292,7 @@ function renderTab(tab){
   if(tab==='calendario')renderCalendario();
   if(tab==='bandeja')renderBandeja();
   if(tab==='inmuebles')renderInmuebles();
+  if(tab==='rrhh')renderRRHH();
   if(tab==='puestos')renderPuestos();
   if(tab==='historico')renderHistorico();
   if(tab==='admin')renderAdmin();
@@ -1160,6 +1162,541 @@ function getVencimientosAnio(ind, anio){
   }
 
   return fechas.filter(f=>!isNaN(f.getTime()));
+}
+
+// ══════════════════════════════════════════
+//  MÓDULO RRHH
+// ══════════════════════════════════════════
+
+// Definiciones de evaluación actitudinal
+const CONDICIONES_BASE=[
+  'Acepta cambios en la modalidad de trabajo. Buena disposición para capacitarse.',
+  'Comunicación. Tiene comunicación fluida con sus pares/superiores/proveedores/clientes.',
+  'Acepta y cumple directivas. Presta atención a las reglas.',
+  'Responsabilidad. Cumple con las responsabilidades.',
+  'Actitud. Tiene buena actitud y predisposición en el trabajo, buen humor.',
+  'Humildad.',
+  'Honestidad.',
+  'Trabajo en equipo. Sabe trabajar en equipo y colabora con sus compañeros.',
+  'Proactividad. Tiene autonomía e iniciativa.',
+  'Prolijidad en el cuidado de los elementos de trabajo y los recursos de la empresa.',
+  'Eficiencia: Emplea bien su tiempo y esfuerzo. Organiza y planifica bien su trabajo.',
+  'Cumple el horario de trabajo.',
+  'Expresión adecuada. Tiene buen trato y respeto con superiores, pares, clientes y proveedores.',
+];
+const CONDICIONES_LIDERAZGO=[
+  'Tiene habilidad para decidir.',
+  'Tiene condiciones de liderazgo.',
+  'Cuida el patrimonio de la empresa.',
+];
+
+// Puestos que son encargados/responsables (usan tabla de liderazgo)
+const PUESTOS_LIDERAZGO=['A_sur','A_norte','coo','9_coo'];
+
+// Objetivos por puesto
+const OBJETIVOS_PUESTO={
+  '1':[
+    {label:'Facturación correcta (% NC/ND/facturas anuladas)',pts:[1,3,5],rangos:['20%>x>11%','1%<x<10%','0%']},
+    {label:'Cobros hechos a tiempo (tiempo promedio acreditación)',pts:[1,3,5],rangos:['Dentro de 5 días del vencimiento','Dentro de 3 días del vencimiento','Dentro de 48hs del vencimiento']},
+    {label:'Sueldos procesados y pagados a tiempo (meses en el año)',pts:[1,3,5],rangos:['10 meses','11 meses','12 meses']},
+    {label:'Archivo cumplimentado (revisión agosto)',pts:[0,5],rangos:['Incompleto','100% completado']},
+  ],
+  '2':[
+    {label:'Pagos a proveedores a tiempo (% dentro del vencimiento)',pts:[0.8,2.4,4],rangos:['70-79%','80-89%','90-100%']},
+    {label:'Tiempo ágil de proceso de facturas (tiempo promedio)',pts:[0.8,2.4,4],rangos:['>8 minutos','6-8 minutos','<5 minutos']},
+    {label:'Reducción de errores de proceso (comprobantes reprocesados)',pts:[0.8,2.4,4],rangos:['21-25%','11-20%','0-10%']},
+    {label:'Comunicar pago a proveedores (satisfacción 10 proveedores)',pts:[0.8,2.4,4],rangos:['70-80% satisfechos','81-90% satisfechos','91-100% satisfechos']},
+    {label:'Archivo cumplimentado (revisión agosto)',pts:[0,4],rangos:['Incompleto','100% completado']},
+  ],
+  '3':[
+    {label:'Libros y firmas al día',pts:[1,3,5],rangos:['Falta info hasta 1 mes antes','Completos sin firmas','Completos y firmados']},
+    {label:'Subdiario de IVA al día',pts:[1,3,5],rangos:['Completo a 2 meses atrás','Completo a 1 mes atrás','Completo a la fecha']},
+    {label:'Firma electrónica para pago de proveedores (días entre proceso y pago)',pts:[1,3,5],rangos:['2.5-3.5 días','1.6-2.5 días','1-1.5 días']},
+    {label:'Archivo cumplimentado (revisión agosto)',pts:[0,5],rangos:['Incompleto','100% completado']},
+  ],
+  '4':[
+    {label:'Buen seguimiento de contratos (planilla completa)',pts:[0,0,4],rangos:['No aplica','No aplica','Completa']},
+    {label:'Pagos de agenda sin retrasos (% fuera de término en 6 meses)',pts:[0.8,2.4,4],rangos:['6-10%','<5%','0%']},
+    {label:'Conciliaciones bancarias',pts:[0.8,2.4,4],rangos:['En tiempo con varios errores','En tiempo, a veces con errores','En tiempo y forma']},
+    {label:'Trabajar efectivamente con control presupuesto Mendoza',pts:[0,2.4,4],rangos:['No aplica','Respuesta efectiva','Respuesta veloz y efectiva']},
+    {label:'Archivo cumplimentado (revisión agosto)',pts:[0,4],rangos:['Incompleto','100% completado']},
+  ],
+  '5':[
+    {label:'Cargas sociales bien hechas',pts:[0.8,2.4,4],rangos:['A tiempo con algunos errores','A tiempo con pocos errores','En tiempo y forma']},
+    {label:'Atención en reuniones y presentación de salas',pts:[0.8,2.4,4],rangos:['Buena','Muy buena','Excelente']},
+    {label:'Formalidades del remate hechas en tiempo y forma',pts:[0.8,2.4,4],rangos:['Con bastantes retrasos','Con algún retraso y pocos errores','Sí']},
+    {label:'Buena atención de la recepción',pts:[0.8,2.4,4],rangos:['Buena','Muy buena','Excelente']},
+    {label:'Buena presencia',pts:[0.8,2.4,4],rangos:['Buena','Muy buena','Excelente']},
+  ],
+  '6':[
+    {label:'Carga eficiente de Órdenes de Compra (días desde confirmación)',pts:[0.8,2.4,4],rangos:['Dos días o menos','Un día','En el transcurso del día']},
+    {label:'Carga eficiente de Presupuesto y CF (meses cargados)',pts:[0.8,2.4,4],rangos:['Menos de 10 meses','10-11 meses','12 meses actualizados']},
+    {label:'Recolectar información completa del proceso de compras',pts:[0.8,2.4,4],rangos:['Algunos pendientes','Casi todo al día','Sí']},
+    {label:'Conseguir liquidaciones de venta en tiempo y forma (% fuera del mes)',pts:[0.8,2.4,4],rangos:['6-8% se pasó del mes','1-5% se pasó del mes','Ninguna se pasó del mes']},
+    {label:'Cotizar y renovar seguros en tiempo y forma',pts:[0.8,2.4,4],rangos:['A tiempo con 1 cotización','2 cotizaciones a tiempo','3 o más cotizaciones a tiempo']},
+  ],
+  '7':[
+    {label:'Registros y certificados de hacienda al día',pts:[1.3,4,6.7],rangos:['Algunos pendientes','Casi todo al día','Sí']},
+    {label:'Buena atención post venta compradores de Cabaña (quejas)',pts:[1.3,4,6.7],rangos:['6+ quejas con informe','5 o menos quejas con informe','Sin quejas con informe']},
+    {label:'Tener los DEPs al día (% datos completos)',pts:[1.3,4,6.7],rangos:['70-75%','75-84%','85-100%']},
+  ],
+  '8':[
+    {label:'Firma electrónica para pago de proveedores (días)',pts:[1,3,5],rangos:['2.5-3.5 días','1.6-2.5 días','1-1.5 días']},
+    {label:'Correcta imputación de facturas',pts:[1,3,5],rangos:['Certeros con reiterados asientos fuera del sistema','Bastante certeros con pocos asientos fuera','Certeros sin asientos fuera del sistema']},
+    {label:'Soporte a Estudio Contable-Impositivo',pts:[1,3,5],rangos:['Buena','Muy buena','Excelente']},
+    {label:'Soporte interno a la administración',pts:[1,3,5],rangos:['Buena','Muy buena','Excelente']},
+  ],
+  'A_sur':[
+    {label:'Mantener el campo prolijo',pts:[1,3,5],rangos:['Razonablemente prolijo','Bastante prolijo','Muy prolijo']},
+    {label:'Mantenimiento estructural del campo (uso del presupuesto)',pts:[1,3,5],rangos:['Usó menos pero está bien','Usó eficientemente','Usó muy eficientemente']},
+    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.1-2%','0.6-1%','<0.5%']},
+    {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['80-84%','85-90%','91-100%']},
+    {label:'Porcentaje de parición',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+  ],
+  'A_norte':[
+    {label:'Mantener el campo prolijo',pts:[1,3,5],rangos:['Razonablemente prolijo','Bastante prolijo','Muy prolijo']},
+    {label:'Mantenimiento estructural del campo (uso del presupuesto)',pts:[1,3,5],rangos:['Usó menos pero está bien','Usó eficientemente','Usó muy eficientemente']},
+    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.6-2.5%','1.1-1.5%','<1%']},
+    {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
+    {label:'Porcentaje de parición',pts:[1,3,5],rangos:['64-72%','73-79%','80-100%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+  ],
+  'B':[
+    {label:'Carga eficiente de requerimiento de compra y remito (% vs facturas)',pts:[0.8,2.4,4],rangos:['80-84%','85-89%','90-100%']},
+    {label:'Carga de ventas de hacienda',pts:[0.8,2.4,4],rangos:['80-84%','85-89%','90-100%']},
+    {label:'Carga de partes de trabajo (días desde realizado)',pts:[0.8,2.4,4],rangos:['15-30 días','7-15 días','Dentro de la semana']},
+    {label:'Carga de planilla de hacienda (día hábil)',pts:[0.8,2.4,4],rangos:['5° día hábil o más','2°-4° día hábil','1° día hábil']},
+    {label:'Carga de cajas chicas en sistema (% cajas)',pts:[0.8,2.4,4],rangos:['70-84%','85-89%','90-100%']},
+  ],
+  'C_sur':[
+    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.1-2%','0.6-1%','<0.5%']},
+    {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['80-84%','85-90%','91-100%']},
+    {label:'Porcentaje de parición',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+  ],
+  'C_norte':[
+    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.6-2.5%','1.1-1.5%','<1%']},
+    {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
+    {label:'Porcentaje de parición',pts:[1,3,5],rangos:['64-72%','73-79%','80-100%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+  ],
+  '9_coo':[
+    {label:'Cumplimiento de objetivos del área',pts:[1,3,5],rangos:['Parcial','Bueno','Excelente']},
+    {label:'Coordinación con el equipo',pts:[1,3,5],rangos:['Básica','Buena','Muy buena']},
+    {label:'Presentación de informes en tiempo y forma',pts:[1,3,5],rangos:['Con retrasos','Casi siempre a tiempo','Siempre a tiempo']},
+  ],
+};
+
+// Calcular porcentaje actitudinal según tabla
+function calcPorcentajeActitudinal(puntaje, esLider){
+  if(esLider){
+    if(puntaje<22) return 50;
+    if(puntaje<=33) return 40;
+    if(puntaje<=40) return 30;
+    return 0;
+  } else {
+    if(puntaje<17) return 50;
+    if(puntaje<=22) return 40;
+    if(puntaje<=37) return 30;
+    return 0;
+  }
+}
+
+// Calcular porcentaje por objetivos según tabla
+function calcPorcentajeObjetivos(puntaje, esLider){
+  if(esLider){
+    if(puntaje<=7) return 0;
+    if(puntaje<=11) return 20;
+    if(puntaje<=16) return 30;
+    if(puntaje<=23) return 40;
+    return 50;
+  } else {
+    if(puntaje<=4) return 0;
+    if(puntaje<=8) return 20;
+    if(puntaje<=14) return 30;
+    if(puntaje<=17) return 40;
+    return 50;
+  }
+}
+
+function calcBono(sueldo, pctActitudinal, pctObjetivos, esLider){
+  const bonMax=esLider?3:1.5;
+  return sueldo * bonMax * (pctActitudinal/100 + pctObjetivos/100);
+}
+
+function getPeriodoActual(){
+  const hoy=new Date();
+  const mes=hoy.getMonth()+1;
+  const anio=hoy.getFullYear();
+  if(mes>=5&&mes<=7) return{periodo:`junio_${anio}`,anio,semestre:1,label:`Junio ${anio}`};
+  return{periodo:`diciembre_${anio}`,anio,semestre:2,label:`Diciembre ${anio}`};
+}
+
+async function renderRRHH(){
+  const main=document.getElementById('main-content');
+  main.innerHTML='<div class="loading">Cargando...</div>';
+  const esDirectivo=['programador','directorio','coo'].includes(currentProfile.rol);
+
+  // Cargar empleados que corresponden según rol
+  let query=sb.from('empleados').select('*').eq('activo',true).order('apellido');
+  const{data:todosEmpleados}=await query;
+
+  // Si no es directivo, filtrar solo los que evalúa
+  let misEmpleados=todosEmpleados||[];
+  if(!esDirectivo){
+    const{data:evalRel}=await sb.from('evaluadores_empleado')
+      .select('empleado_id').eq('evaluador_user_id',currentUser.id).eq('activo',true);
+    const ids=(evalRel||[]).map(e=>e.empleado_id);
+    misEmpleados=misEmpleados.filter(e=>ids.includes(e.id));
+  }
+
+  const periodo=getPeriodoActual();
+
+  // Cargar evaluaciones del período actual
+  const{data:evals}=await sb.from('evaluaciones')
+    .select('*').eq('periodo',periodo.periodo);
+  const evalsPorEmpleado={};
+  (evals||[]).forEach(e=>{ if(!evalsPorEmpleado[e.empleado_id]) evalsPorEmpleado[e.empleado_id]=[]; evalsPorEmpleado[e.empleado_id].push(e); });
+
+  const pendientes=misEmpleados.filter(e=>!evalsPorEmpleado[e.id]||evalsPorEmpleado[e.id].every(ev=>ev.estado==='borrador')).length;
+
+  main.innerHTML=`
+    <div class="section-heading">Recursos Humanos</div>
+    <div class="section-sub">Evaluaciones de desempeño · ${periodo.label}</div>
+
+    ${pendientes>0?`<div class="alert alert-warning" style="margin-bottom:1rem">
+      ⏰ Tenés <strong>${pendientes} evaluación${pendientes>1?'es':''} pendiente${pendientes>1?'s':''}</strong> para el período ${periodo.label}
+    </div>`:''}
+
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="rrhhTab('evaluar',this)">Evaluar empleados</button>
+      ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>
+      <button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button>`:''}
+    </div>
+    <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo)}</div>
+  `;
+  window._rrhhData={misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo};
+}
+
+function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo){
+  if(empleados.length===0) return`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No tenés empleados asignados para evaluar.</div></div>`;
+  return`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem">
+    ${empleados.map(emp=>{
+      const evs=evalsPorEmpleado[emp.id]||[];
+      const miEval=evs.find(e=>e.evaluador_user_id===currentUser.id);
+      const estado=miEval?.estado||'pendiente';
+      let badgeClass='badge-pend',badgeLabel='Pendiente';
+      if(estado==='aprobado'){badgeClass='badge-ok';badgeLabel='Aprobado';}
+      else if(estado==='enviado'){badgeClass='badge-info';badgeLabel='Enviado';}
+      else if(estado==='borrador'){badgeClass='badge-na';badgeLabel='Borrador';}
+      const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
+      return`<div class="puesto-card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
+          <div>
+            <div style="font-size:.9rem;font-weight:500;color:var(--text)">${emp.nombre} ${emp.apellido||''}</div>
+            <div style="font-size:.75rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''}</div>
+            ${esLider?`<span class="badge badge-info" style="margin-top:4px;font-size:.68rem">Encargado/Responsable</span>`:''}
+          </div>
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
+        </div>
+        ${miEval&&miEval.bono_calculado?`
+          <div style="font-size:.78rem;margin-bottom:.5rem">
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Puntaje actitudinal</span><span>${miEval.puntaje_actitudinal} pts → ${miEval.porcentaje_actitudinal}%</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Puntaje objetivos</span><span>${miEval.puntaje_objetivos} pts → ${miEval.porcentaje_objetivos}%</span></div>
+            <div style="display:flex;justify-content:space-between;font-weight:500;margin-top:4px"><span style="color:var(--muted)">Bono calculado</span><span style="color:var(--accent)">$${miEval.bono_calculado.toLocaleString('es-AR')}</span></div>
+          </div>`:''}
+        <button class="btn btn-accent btn-sm" style="width:100%" onclick="abrirEvaluacion('${emp.id}')">
+          ${estado==='pendiente'?'Iniciar evaluación':estado==='borrador'?'Continuar evaluación':'Ver evaluación'}
+        </button>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function rrhhTab(tab,btn){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const{misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo}=window._rrhhData;
+  const panel=document.getElementById('rrhh-panel');
+  if(tab==='evaluar') panel.innerHTML=renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo);
+  if(tab==='resumen') panel.innerHTML=renderRRHHResumen(todosEmpleados,evalsPorEmpleado,periodo);
+  if(tab==='aprobar') panel.innerHTML=renderRRHHAprobar(todosEmpleados,evalsPorEmpleado,periodo);
+}
+
+function renderRRHHResumen(empleados,evalsPorEmpleado,periodo){
+  const total=empleados.length;
+  const evaluados=empleados.filter(e=>(evalsPorEmpleado[e.id]||[]).some(ev=>ev.estado!=='borrador')).length;
+  const pendientes=total-evaluados;
+  return`<div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Resumen · ${periodo.label}</div>
+    <div class="metrics-grid">
+      <div class="metric-card"><div class="metric-label">Total empleados</div><div class="metric-value">${total}</div></div>
+      <div class="metric-card"><div class="metric-label">Evaluados</div><div class="metric-value" style="color:var(--success)">${evaluados}</div></div>
+      <div class="metric-card"><div class="metric-label">Pendientes</div><div class="metric-value" style="color:var(--warning)">${pendientes}</div></div>
+    </div>
+  </div>
+  <div class="card"><div class="card-title">Estado de evaluaciones</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Empleado</th><th>Puesto</th><th>Área</th><th>Estado</th><th>Bono calculado</th></tr></thead>
+      <tbody>${empleados.map(e=>{
+        const evs=evalsPorEmpleado[e.id]||[];
+        const ev=evs[0];
+        let estado='<span class="badge badge-pend">Pendiente</span>';
+        if(ev?.estado==='aprobado') estado='<span class="badge badge-ok">Aprobado</span>';
+        else if(ev?.estado==='enviado') estado='<span class="badge badge-info">Enviado</span>';
+        else if(ev?.estado==='borrador') estado='<span class="badge badge-na">Borrador</span>';
+        // Promedio si hay 2 evaluaciones
+        const bonoPromedio=evs.length>1?evs.reduce((a,v)=>a+(v.bono_calculado||0),0)/evs.length:ev?.bono_calculado;
+        return`<tr>
+          <td><strong>${e.nombre} ${e.apellido||''}</strong></td>
+          <td style="color:var(--muted);font-size:.82rem">${e.puesto_descripcion||'—'}</td>
+          <td style="color:var(--muted)">${e.area||'—'}</td>
+          <td>${estado}</td>
+          <td>${bonoPromedio?'$'+bonoPromedio.toLocaleString('es-AR'):'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function renderRRHHAprobar(empleados,evalsPorEmpleado,periodo){
+  const paraAprobar=empleados.filter(e=>(evalsPorEmpleado[e.id]||[]).some(ev=>ev.estado==='enviado'));
+  if(paraAprobar.length===0) return`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay evaluaciones enviadas para aprobar en este período.</div></div>`;
+  return`<div class="card"><div class="card-title">Evaluaciones para aprobar · ${periodo.label}</div>
+    ${paraAprobar.map(emp=>{
+      const evs=(evalsPorEmpleado[emp.id]||[]).filter(ev=>ev.estado==='enviado');
+      const bonoPromedio=evs.reduce((a,v)=>a+(v.bono_calculado||0),0)/evs.length;
+      const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
+      return`<div class="puesto-card" style="margin-bottom:.75rem">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
+          <div>
+            <div style="font-size:.9rem;font-weight:500">${emp.nombre} ${emp.apellido||''}</div>
+            <div style="font-size:.75rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:.85rem;font-weight:500;color:var(--accent)">$${bonoPromedio.toLocaleString('es-AR')}</div>
+            <div style="font-size:.72rem;color:var(--muted)">${evs.length>1?'Promedio de '+evs.length+' evaluaciones':''}</div>
+          </div>
+        </div>
+        ${evs.map(ev=>`<div style="font-size:.78rem;background:var(--bg);border-radius:var(--radius);padding:.5rem .75rem;margin-bottom:.4rem">
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Actitudinal</span><span>${ev.puntaje_actitudinal} pts → ${ev.porcentaje_actitudinal}%</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Objetivos</span><span>${ev.puntaje_objetivos} pts → ${ev.porcentaje_objetivos}%</span></div>
+        </div>`).join('')}
+        <div style="display:flex;gap:.5rem;margin-top:.75rem;flex-wrap:wrap">
+          <button class="btn btn-accent btn-sm" onclick="aprobarBono('${emp.id}','${periodo.periodo}',${bonoPromedio})">✓ Aprobar $${bonoPromedio.toLocaleString('es-AR')}</button>
+          <button class="btn btn-sm" onclick="rectificarBono('${emp.id}','${periodo.periodo}',${bonoPromedio})">Rectificar monto</button>
+        </div>
+        <div id="msg-aprobar-${emp.id}"></div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function aprobarBono(empleadoId, periodo, monto){
+  const{error}=await sb.from('evaluaciones').update({
+    estado:'aprobado', bono_aprobado:monto, bono_rectificado:false,
+    aprobado_por:currentUser.id, aprobado_at:new Date().toISOString()
+  }).eq('empleado_id',empleadoId).eq('periodo',periodo);
+  const el=document.getElementById('msg-aprobar-'+empleadoId);
+  if(error){if(el){el.textContent='Error: '+error.message;el.className='msg-err';}}
+  else{if(el){el.textContent='✓ Bono aprobado';el.className='msg-ok';}setTimeout(()=>renderRRHH(),1500);}
+}
+
+async function rectificarBono(empleadoId, periodo, montoOriginal){
+  const nuevo=prompt(`Bono calculado: $${montoOriginal.toLocaleString('es-AR')}\nIngresá el monto rectificado:`);
+  if(!nuevo) return;
+  const motivo=prompt('Motivo de la rectificación (obligatorio):');
+  if(!motivo) return;
+  const{error}=await sb.from('evaluaciones').update({
+    estado:'aprobado', bono_aprobado:parseFloat(nuevo), bono_rectificado:true,
+    motivo_rectificacion:motivo, aprobado_por:currentUser.id, aprobado_at:new Date().toISOString()
+  }).eq('empleado_id',empleadoId).eq('periodo',periodo);
+  const el=document.getElementById('msg-aprobar-'+empleadoId);
+  if(error){if(el){el.textContent='Error: '+error.message;el.className='msg-err';}}
+  else{if(el){el.textContent='✓ Bono rectificado y aprobado';el.className='msg-ok';}setTimeout(()=>renderRRHH(),1500);}
+}
+
+async function abrirEvaluacion(empleadoId){
+  const{misEmpleados,evalsPorEmpleado,periodo}=window._rrhhData;
+  const emp=misEmpleados.find(e=>e.id===empleadoId);
+  if(!emp) return;
+  const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
+  const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
+  const objetivos=OBJETIVOS_PUESTO[emp.puesto_codigo]||[];
+  const evalExistente=(evalsPorEmpleado[empleadoId]||[]).find(e=>e.evaluador_user_id===currentUser.id);
+  const actPrev=evalExistente?.actitudinal||{};
+  const objPrev=evalExistente?.objetivos||{};
+  const sueldoPrev=evalExistente?.sueldo_al_momento||'';
+
+  const panel=document.getElementById('rrhh-panel');
+  panel.innerHTML=`
+    <button class="btn btn-sm" onclick="renderRRHH()" style="margin-bottom:1rem">← Volver</button>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem">
+        <div>
+          <div class="section-heading" style="font-size:1.25rem;margin-bottom:2px">${emp.nombre} ${emp.apellido||''}</div>
+          <div style="font-size:.8rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''} · ${periodo.label}</div>
+        </div>
+        ${esLider?`<span class="badge badge-info">Encargado / Responsable</span>`:''}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Sueldo al momento de la evaluación ($)</label>
+        <input type="number" class="form-input" id="eval-sueldo" value="${sueldoPrev}" placeholder="Ingresá el sueldo bruto" style="max-width:220px" oninput="recalcularBono()"/>
+      </div>
+
+      <div style="margin-bottom:1.5rem">
+        <div class="card-title">Evaluación actitudinal</div>
+        <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem">Escala: 1=Sí · 2=Generalmente sí · 3=A veces · 4=Generalmente no · 5=No</div>
+        ${condiciones.map((c,i)=>`
+          <div style="display:flex;align-items:center;gap:.75rem;padding:.6rem 0;border-bottom:0.5px solid var(--border);flex-wrap:wrap">
+            <div style="flex:1;min-width:200px;font-size:.82rem;color:var(--text)">${c}</div>
+            <div style="display:flex;gap:.4rem">
+              ${[1,2,3,4,5].map(v=>`<button class="btn btn-sm ${actPrev['c'+i]===v?'btn-accent':''}" id="act-${i}-${v}" onclick="setActitudinal(${i},${v})" style="min-width:32px;padding:.3rem .5rem">${v}</button>`).join('')}
+            </div>
+          </div>`).join('')}
+        <div style="margin-top:.75rem;font-size:.85rem;font-weight:500">
+          Puntaje actitudinal: <span id="puntaje-actitudinal">—</span> pts → <span id="pct-actitudinal" style="color:var(--accent)">—</span>% del bono actitudinal
+        </div>
+      </div>
+
+      ${objetivos.length>0?`
+      <div style="margin-bottom:1.5rem">
+        <div class="card-title">Evaluación por objetivos</div>
+        ${objetivos.map((obj,i)=>`
+          <div style="padding:.75rem 0;border-bottom:0.5px solid var(--border)">
+            <div style="font-size:.82rem;font-weight:500;color:var(--text);margin-bottom:.4rem">${obj.label}</div>
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+              ${obj.pts.map((p,j)=>`<button class="btn btn-sm ${objPrev['o'+i]===p?'btn-accent':''}" id="obj-${i}-${j}" onclick="setObjetivo(${i},${p},${j},'${emp.puesto_codigo}')" style="font-size:.72rem;padding:.3rem .6rem">
+                ${p} pts<br><span style="font-size:.65rem;opacity:.8">${obj.rangos[j]||''}</span>
+              </button>`).join('')}
+            </div>
+          </div>`).join('')}
+        <div style="margin-top:.75rem;font-size:.85rem;font-weight:500">
+          Puntaje objetivos: <span id="puntaje-objetivos">—</span> pts → <span id="pct-objetivos" style="color:var(--accent)">—</span>% del bono objetivos
+        </div>
+      </div>`:''}
+
+      <div style="background:var(--bg);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
+        <div style="font-size:.85rem;font-weight:500;margin-bottom:.5rem">Bono estimado</div>
+        <div id="bono-preview" style="font-size:1.4rem;font-weight:500;color:var(--accent);font-family:var(--font-disp)">—</div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:.25rem">Bono máximo: ${esLider?'3x':'1.5x'} el sueldo</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Notas adicionales (opcional)</label>
+        <textarea class="form-textarea" id="eval-notas" placeholder="Observaciones, contexto, factores externos...">${evalExistente?.notas||''}</textarea>
+      </div>
+
+      <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+        <button class="btn" onclick="guardarEvaluacion('${emp.id}','${emp.puesto_codigo}',${esLider},'borrador')">Guardar borrador</button>
+        <button class="btn btn-accent" onclick="guardarEvaluacion('${emp.id}','${emp.puesto_codigo}',${esLider},'enviado')">Enviar al Directorio</button>
+      </div>
+      <div id="msg-eval" style="margin-top:.5rem"></div>
+    </div>`;
+
+  // Inicializar estado de botones con valores previos
+  window._evalState={actitudinal:{...actPrev},objetivos:{...objPrev},esLider,puesto:emp.puesto_codigo};
+  Object.entries(actPrev).forEach(([k,v])=>{
+    const i=parseInt(k.replace('c',''));
+    [1,2,3,4,5].forEach(x=>{const b=document.getElementById(`act-${i}-${x}`);if(b)b.className=`btn btn-sm ${x===v?'btn-accent':''}`;});
+  });
+  recalcularBono();
+}
+
+function setActitudinal(idx, val){
+  window._evalState.actitudinal['c'+idx]=val;
+  const esLider=window._evalState.esLider;
+  const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
+  [1,2,3,4,5].forEach(v=>{
+    const b=document.getElementById(`act-${idx}-${v}`);
+    if(b) b.className=`btn btn-sm ${v===val?'btn-accent':''}`;
+  });
+  recalcularBono();
+}
+
+function setObjetivo(idx, pts, btnIdx, puesto){
+  window._evalState.objetivos['o'+idx]=pts;
+  const obj=OBJETIVOS_PUESTO[puesto]||[];
+  if(obj[idx]){
+    obj[idx].pts.forEach((p,j)=>{
+      const b=document.getElementById(`obj-${idx}-${j}`);
+      if(b) b.className=`btn btn-sm ${j===btnIdx?'btn-accent':''}`;
+    });
+  }
+  recalcularBono();
+}
+
+function recalcularBono(){
+  const{actitudinal,objetivos,esLider}=window._evalState||{};
+  const sueldo=parseFloat(document.getElementById('eval-sueldo')?.value)||0;
+  const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
+  const pAct=Object.values(actitudinal||{}).reduce((a,b)=>a+b,0);
+  const completoAct=Object.keys(actitudinal||{}).length===condiciones.length;
+  const pObj=Object.values(objetivos||{}).reduce((a,b)=>a+b,0);
+  const pctAct=calcPorcentajeActitudinal(pAct,esLider);
+  const pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  const elPA=document.getElementById('puntaje-actitudinal');
+  const elPctA=document.getElementById('pct-actitudinal');
+  const elPO=document.getElementById('puntaje-objetivos');
+  const elPctO=document.getElementById('pct-objetivos');
+  const elBono=document.getElementById('bono-preview');
+  if(elPA) elPA.textContent=completoAct?pAct:'(incompleto)';
+  if(elPctA) elPctA.textContent=completoAct?pctAct:'—';
+  if(elPO) elPO.textContent=Object.keys(objetivos||{}).length>0?pObj:'(incompleto)';
+  if(elPctO) elPctO.textContent=Object.keys(objetivos||{}).length>0?pctObj:'—';
+  if(elBono){
+    if(sueldo&&completoAct&&Object.keys(objetivos||{}).length>0){
+      const bono=calcBono(sueldo,pctAct,pctObj,esLider);
+      elBono.textContent='$'+bono.toLocaleString('es-AR',{minimumFractionDigits:2});
+    } else {
+      elBono.textContent='Complete todos los campos para calcular';
+      elBono.style.fontSize='.85rem';
+      elBono.style.color='var(--muted)';
+    }
+  }
+}
+
+async function guardarEvaluacion(empleadoId, puesto, esLider, estado){
+  const msgEl=document.getElementById('msg-eval');
+  if(msgEl){msgEl.textContent='Guardando...';msgEl.className='form-hint';}
+  const{actitudinal,objetivos}=window._evalState||{};
+  const sueldo=parseFloat(document.getElementById('eval-sueldo')?.value)||null;
+  const notas=document.getElementById('eval-notas')?.value||'';
+  const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
+  const pAct=Object.values(actitudinal||{}).reduce((a,b)=>a+b,0);
+  const pObj=Object.values(objetivos||{}).reduce((a,b)=>a+b,0);
+  const pctAct=calcPorcentajeActitudinal(pAct,esLider);
+  const pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  const bono=sueldo?calcBono(sueldo,pctAct,pctObj,esLider):null;
+  const periodo=window._rrhhData.periodo;
+
+  // Verificar si existe evaluación previa
+  const{data:existing}=await sb.from('evaluaciones')
+    .select('id').eq('empleado_id',empleadoId).eq('evaluador_user_id',currentUser.id).eq('periodo',periodo.periodo);
+
+  const payload={
+    empleado_id:empleadoId, evaluador_user_id:currentUser.id,
+    periodo:periodo.periodo, anio:periodo.anio, semestre:periodo.semestre,
+    sueldo_al_momento:sueldo, actitudinal, objetivos,
+    puntaje_actitudinal:pAct, porcentaje_actitudinal:pctAct,
+    puntaje_objetivos:pObj, porcentaje_objetivos:pctObj,
+    bono_calculado:bono, estado, notas
+  };
+
+  let error;
+  if(existing&&existing.length>0){
+    ({error}=await sb.from('evaluaciones').update(payload).eq('id',existing[0].id));
+  } else {
+    ({error}=await sb.from('evaluaciones').insert(payload));
+  }
+
+  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
+  else{
+    if(msgEl){msgEl.textContent=estado==='enviado'?'✓ Evaluación enviada al Directorio':'✓ Borrador guardado';msgEl.className='msg-ok';}
+    setTimeout(()=>renderRRHH(),1500);
+  }
 }
 
 // ── INMUEBLES ──

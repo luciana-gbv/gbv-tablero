@@ -564,6 +564,9 @@ async function loadIndicatorsPanel(){
   }
   // Limpiar cache de variables al cambiar categoría
   _varCache={};
+  _allVarsLoaded=false;
+  // Precargar todas las variables de los indicadores de esta categoría en una sola consulta
+  await preloadVariables(filtered);
   const cards=await Promise.all(filtered.map(ind=>renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs)));
   panel.innerHTML=cards.join('');
 }
@@ -571,9 +574,21 @@ async function loadIndicatorsPanel(){
 // Cache de variables por indicador y valores pre-cargados por período
 let _varCache={};
 let _valCache={};  // { clave_periodo: valor }
+let _allVarsLoaded=false;
+
+async function preloadVariables(indicadores){
+  if(_allVarsLoaded) return;
+  const ids=indicadores.map(i=>i.id);
+  const{data}=await sb.from('indicador_variables').select('*').in('indicador_id',ids).order('orden');
+  (data||[]).forEach(v=>{
+    if(!_varCache[v.indicador_id]) _varCache[v.indicador_id]=[];
+    _varCache[v.indicador_id].push(v);
+  });
+  _allVarsLoaded=true;
+}
 
 async function getVariables(indId){
-  if(_varCache[indId]) return _varCache[indId];
+  if(_varCache[indId]!==undefined) return _varCache[indId];
   const{data}=await sb.from('indicador_variables').select('*').eq('indicador_id',indId).order('orden');
   _varCache[indId]=data||[];
   return _varCache[indId];
@@ -802,14 +817,19 @@ async function renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosB
           ${inputVars.map(v=>{
             const preval=preCargados[v.clave];
             const bloqueado=preval!==undefined;
+            // Pre-llenar hectáreas automáticamente desde la unidad de negocio
+            const esHectareas=v.clave==='hectareas_campo';
+            const valorHa=esHectareas?hasTotal:null;
+            const valorFinal=bloqueado?preval:esHectareas&&valorHa?valorHa:'';
+            const estaBloqueado=bloqueado||(esHectareas&&valorHa>0);
             return`<div class="form-group">
               <label class="form-label">${v.nombre} ${v.unidad?`<span style="color:var(--muted);font-weight:400">(${v.unidad})</span>`:''}
-              ${bloqueado?`<span style="font-size:.68rem;color:var(--success);margin-left:.25rem">✓ pre-cargado</span>`:''}</label>
+              ${estaBloqueado?`<span style="font-size:.68rem;color:var(--success);margin-left:.25rem">${esHectareas&&!bloqueado?'✓ automático':'✓ pre-cargado'}</span>`:''}</label>
               <input type="number" class="form-input" 
                 id="var-${id}-${v.clave}" 
                 placeholder="0" 
-                value="${bloqueado?preval:''}"
-                ${bloqueado?'style="background:#F4FAF6;border-color:#A8D5B5" readonly title="Este valor ya fue cargado para este período"':''}
+                value="${valorFinal}"
+                ${estaBloqueado?`style="background:#F4FAF6;border-color:#A8D5B5" readonly title="${esHectareas&&!bloqueado?`Hectáreas totales de ${unidadNombre}: ${valorHa?.toLocaleString('es-AR')} ha`:'Este valor ya fue cargado para este período'}"`:'' }
                 step="any"
                 oninput="calcVars('${id}')"/>
             </div>`;

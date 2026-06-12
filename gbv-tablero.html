@@ -562,11 +562,16 @@ async function loadIndicatorsPanel(){
   if(selectedCat==='rrhh'&&!['programador','directorio','coo'].includes(currentProfile.rol)){
     panel.innerHTML='<div class="card"><div class="locked"><div style="font-size:2rem;margin-bottom:.75rem">🔒</div><div style="font-size:.85rem">Esta sección es solo para el Directorio.</div></div></div>';return;
   }
-  // Limpiar cache de variables al cambiar categoría
+  // Limpiar cache al cambiar categoría
   _varCache={};
   _allVarsLoaded=false;
-  // Precargar todas las variables de los indicadores de esta categoría en una sola consulta
-  await preloadVariables(filtered);
+  _periodoValsCache={};
+  // Precargar variables y valores del período en paralelo
+  const periodoFijoRef=getPeriodoFijo(filtered[0]);
+  await Promise.all([
+    preloadVariables(filtered),
+    preloadValoresPeriodo(periodoFijoRef, selectedUnidad)
+  ]);
   const cards=await Promise.all(filtered.map(ind=>renderIndCardAsync(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs)));
   panel.innerHTML=cards.join('');
 }
@@ -595,16 +600,28 @@ async function getVariables(indId){
 }
 
 // Buscar valores ya cargados para el mismo período y clave compartida
-async function getValoresPeriodo(claves, periodo, unidadId){
-  if(!claves.length||!periodo) return {};
-  // Buscar en entry_variables entries del mismo período y unidad
+let _periodoValsCache={};
+
+async function preloadValoresPeriodo(periodo, unidadId){
+  const cacheKey=periodo+'_'+unidadId;
+  if(_periodoValsCache[cacheKey]) return;
+  if(!periodo||!unidadId){_periodoValsCache[cacheKey]={};return;}
   const{data}=await sb.from('entry_variables')
     .select('clave,valor,entries!inner(periodo_fecha,unidad_negocio_id)')
     .eq('entries.periodo_fecha', periodo)
-    .eq('entries.unidad_negocio_id', unidadId)
-    .in('clave', claves);
+    .eq('entries.unidad_negocio_id', unidadId);
   const result={};
   (data||[]).forEach(ev=>{ if(!(ev.clave in result)) result[ev.clave]=ev.valor; });
+  _periodoValsCache[cacheKey]=result;
+}
+
+async function getValoresPeriodo(claves, periodo, unidadId){
+  if(!claves.length||!periodo) return {};
+  const cacheKey=periodo+'_'+unidadId;
+  if(!_periodoValsCache[cacheKey]) await preloadValoresPeriodo(periodo, unidadId);
+  const cache=_periodoValsCache[cacheKey]||{};
+  const result={};
+  claves.forEach(c=>{ if(c in cache) result[c]=cache[c]; });
   return result;
 }
 

@@ -131,7 +131,26 @@ tr:hover td{background:var(--bg)}
     <div class="topbar-right">
       <span class="topbar-user" id="topbar-name"></span>
       <span class="badge-role" id="topbar-role"></span>
+      <button onclick="mostrarCambiarPassword()" style="font-size:.72rem;padding:3px 8px;border-radius:var(--radius);border:0.5px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font-body)">Cambiar contraseña</button>
       <button class="btn-logout" onclick="doLogout()">Salir</button>
+    </div>
+  </div>
+  <div id="modal-password" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:var(--radius);padding:2rem;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.15)">
+      <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:1rem">Cambiar contraseña</div>
+      <div class="form-group">
+        <label class="form-label">Nueva contraseña</label>
+        <input type="password" class="form-input" id="nueva-pass" placeholder="Mínimo 8 caracteres"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirmar contraseña</label>
+        <input type="password" class="form-input" id="confirmar-pass" placeholder="Repetí la contraseña"/>
+      </div>
+      <div id="msg-cambiar-pass" style="font-size:.8rem;margin-bottom:.75rem"></div>
+      <div style="display:flex;gap:.75rem">
+        <button class="btn btn-accent" onclick="guardarNuevaPassword()">Guardar</button>
+        <button class="btn" onclick="cerrarModalPassword()">Cancelar</button>
+      </div>
     </div>
   </div>
   <div class="nav-tabs" id="nav-tabs"></div>
@@ -159,6 +178,34 @@ async function doLogin(){
   const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
   if(error){errEl.textContent='Email o contraseña incorrectos.';return;}
   await initApp(data.user);
+}
+
+function mostrarCambiarPassword(){
+  const modal=document.getElementById('modal-password');
+  modal.style.display='flex';
+  document.getElementById('nueva-pass').value='';
+  document.getElementById('confirmar-pass').value='';
+  document.getElementById('msg-cambiar-pass').textContent='';
+}
+
+function cerrarModalPassword(){
+  document.getElementById('modal-password').style.display='none';
+}
+
+async function guardarNuevaPassword(){
+  const nueva=document.getElementById('nueva-pass').value;
+  const confirmar=document.getElementById('confirmar-pass').value;
+  const msgEl=document.getElementById('msg-cambiar-pass');
+  if(nueva.length<8){msgEl.textContent='La contraseña debe tener al menos 8 caracteres.';msgEl.style.color='var(--danger)';return;}
+  if(nueva!==confirmar){msgEl.textContent='Las contraseñas no coinciden.';msgEl.style.color='var(--danger)';return;}
+  msgEl.textContent='Guardando...';msgEl.style.color='var(--muted)';
+  const{error}=await sb.auth.updateUser({password:nueva});
+  if(error){msgEl.textContent='Error: '+error.message;msgEl.style.color='var(--danger)';}
+  else{
+    msgEl.textContent='✓ Contraseña actualizada correctamente';
+    msgEl.style.color='var(--success)';
+    setTimeout(()=>cerrarModalPassword(),2000);
+  }
 }
 
 async function doLogout(){

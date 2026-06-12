@@ -1983,12 +1983,184 @@ async function guardarEvaluacion(empleadoId, puesto, esLider, estado){
 async function renderInmuebles(){
   const main=document.getElementById('main-content');
   main.innerHTML='<div class="loading">Cargando...</div>';
+  const esGestor=['programador','operativo'].includes(currentProfile.rol);
 
   const[{data:inmuebles},{data:contratos},{data:alertas}]=await Promise.all([
     sb.from('inmuebles_urbanos').select('*').eq('activo',true).order('direccion'),
     sb.from('contratos_inmuebles').select('*').eq('activo',true).order('fecha_inicio',{ascending:false}),
     sb.from('alertas_inmuebles').select('*,profiles(nombre,apellido)').eq('resuelta',false).order('created_at',{ascending:false})
   ]);
+
+  const inm=inmuebles||[];
+  const cont=contratos||[];
+  const alrt=alertas||[];
+
+  const contratosPorInmueble={};
+  cont.forEach(c=>{if(!contratosPorInmueble[c.inmueble_id])contratosPorInmueble[c.inmueble_id]=c;});
+  const ocupados=inm.filter(i=>contratosPorInmueble[i.id]).length;
+  const desocupados=inm.length-ocupados;
+  const ingresoMensual=cont.reduce((a,c)=>a+(c.precio_mensual||0),0);
+
+  const hoy=new Date();
+  const en60=new Date(hoy); en60.setDate(en60.getDate()+60);
+  const porVencer=cont.filter(c=>c.fecha_fin&&new Date(c.fecha_fin)<=en60&&new Date(c.fecha_fin)>=hoy);
+
+  const meses=[];
+  for(let i=11;i>=0;i--){
+    const d=new Date(hoy.getFullYear(),hoy.getMonth()-i,1);
+    meses.push({label:d.toLocaleDateString('es-AR',{month:'short'}),year:d.getFullYear(),month:d.getMonth(),date:d});
+  }
+
+  main.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+      <div>
+        <div class="section-heading" style="margin-bottom:2px">Inmuebles urbanos</div>
+        <div class="section-sub">Gestión de propiedades · situación actual y evolución histórica</div>
+      </div>
+      ${esGestor?`<button class="btn btn-accent" onclick="abrirModalInmueble()">+ Agregar inmueble</button>`:''}
+    </div>
+
+    <div class="metrics-grid" style="margin-bottom:1.25rem">
+      <div class="metric-card"><div class="metric-label">Total inmuebles</div><div class="metric-value">${inm.length}</div></div>
+      <div class="metric-card"><div class="metric-label">Ocupados</div><div class="metric-value" style="color:var(--success)">${ocupados}</div><div class="metric-sub up">${inm.length?Math.round(ocupados/inm.length*100):0}% ocupación</div></div>
+      <div class="metric-card"><div class="metric-label">Desocupados</div><div class="metric-value" style="color:var(--warning)">${desocupados}</div></div>
+      <div class="metric-card"><div class="metric-label">Ingreso mensual</div><div class="metric-value">${ingresoMensual>0?'$'+ingresoMensual.toLocaleString('es-AR'):'—'}</div></div>
+    </div>
+
+    ${alrt.length>0||porVencer.length>0?`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Alertas activas</div>
+      ${alrt.map(a=>`
+        <div class="alert ${a.tipo==='impago'?'alert-danger':a.tipo==='rescision'?'alert-warning':'alert-info'}" style="margin-bottom:.5rem">
+          <div><strong>${inm.find(i=>i.id===a.inmueble_id)?.direccion||'Inmueble'}</strong> — ${a.tipo==='impago'?'Incumplimiento de pago':a.tipo==='rescision'?'Rescisión anticipada':a.tipo==='daño'?'Daño a la propiedad':'Novedad'}: ${a.descripcion}
+          <span style="font-size:.75rem;color:var(--muted);display:block;margin-top:2px">Reportado por ${(a.profiles?.nombre||'')+' '+(a.profiles?.apellido||'')} · ${new Date(a.fecha).toLocaleDateString('es-AR')}</span></div>
+        </div>`).join('')}
+      ${porVencer.map(c=>`
+        <div class="alert alert-warning" style="margin-bottom:.5rem">
+          <div><strong>${inm.find(i=>i.id===c.inmueble_id)?.direccion||'Inmueble'}</strong> — Contrato vence el ${new Date(c.fecha_fin).toLocaleDateString('es-AR')} · Inquilino: ${c.inquilino||'—'}</div>
+        </div>`).join('')}
+    </div>`:''}
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Línea de tiempo · ocupación (últimos 12 meses)</div>
+      <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+        <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)"><span style="width:12px;height:12px;background:#2D5A3D;border-radius:3px;display:inline-block"></span>Ocupado</span>
+        <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)"><span style="width:12px;height:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:3px;display:inline-block"></span>Desocupado</span>
+        <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)"><span style="width:12px;height:12px;background:#C0392B;border-radius:3px;display:inline-block"></span>Incumplimiento</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%;min-width:500px">
+          <thead><tr>
+            <td style="width:180px"></td>
+            ${meses.map(m=>`<td style="font-size:10px;color:var(--muted);text-align:center;padding:0 1px 6px;min-width:40px">${m.label}</td>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${inm.map(inm_item=>{
+              const contrato=contratosPorInmueble[inm_item.id];
+              const alertaInm=alrt.find(a=>a.inmueble_id===inm_item.id&&a.tipo==='impago');
+              return`<tr>
+                <td style="font-size:11px;color:var(--text);padding:2px 12px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${inm_item.direccion}">${inm_item.direccion}</td>
+                ${meses.map(m=>{
+                  let color='var(--bg)';let border='0.5px solid var(--border)';
+                  if(contrato){
+                    const ini=new Date(contrato.fecha_inicio);
+                    const fin=contrato.fecha_fin?new Date(contrato.fecha_fin):new Date('2099-12-31');
+                    if(m.date>=ini&&m.date<=fin){color=alertaInm?'#C0392B':'#2D5A3D';border='none';}
+                  }
+                  return`<td style="padding:2px 1px"><div style="height:20px;border-radius:3px;background:${color};border:${border}"></div></td>`;
+                }).join('')}
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Distribución de superficie</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:center">
+        <div style="position:relative;height:200px"><canvas id="chart-inmuebles-torta"></canvas></div>
+        <div id="torta-leyenda" style="display:flex;flex-direction:column;gap:.5rem"></div>
+      </div>
+    </div>
+
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="inmTab('actual',this)">Situación actual</button>
+      <button class="tab-btn" onclick="inmTab('todos',this)">Todos los inmuebles</button>
+      ${['programador','coo','operativo'].includes(currentProfile.rol)?`<button class="tab-btn" onclick="inmTab('nueva',this)">+ Reportar alerta</button>`:''}
+    </div>
+    <div id="inm-panel">${renderInmActual(inm,contratosPorInmueble,alrt,esGestor)}</div>
+
+    <!-- Modal agregar/editar inmueble -->
+    <div id="modal-inmueble" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:1rem" id="modal-inm-titulo">Agregar inmueble</div>
+        <input type="hidden" id="inm-edit-id"/>
+        <div class="form-group"><label class="form-label">Dirección *</label><input type="text" class="form-input" id="inm-direccion" placeholder="Ej: Av. Libertador 1240"/></div>
+        <div class="form-group"><label class="form-label">Localidad</label><input type="text" class="form-input" id="inm-localidad" placeholder="Ej: Buenos Aires"/></div>
+        <div class="form-group"><label class="form-label">Superficie (m²)</label><input type="number" class="form-input" id="inm-metros" placeholder="0" step="0.01"/></div>
+        <div class="form-group"><label class="form-label">Notas / descripción</label><textarea class="form-textarea" id="inm-descripcion" placeholder="Piso, UF, cocheras, locador..."></textarea></div>
+        <div id="msg-modal-inm" style="font-size:.8rem;margin-bottom:.75rem"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" onclick="guardarInmueble()">Guardar</button>
+          <button class="btn" onclick="cerrarModalInmueble()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal agregar contrato -->
+    <div id="modal-contrato" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:.25rem" id="modal-cont-titulo">Agregar contrato</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:1rem" id="modal-cont-inmueble"></div>
+        <input type="hidden" id="cont-inmueble-id"/>
+        <div class="form-group"><label class="form-label">Inquilino *</label><input type="text" class="form-input" id="cont-inquilino" placeholder="Nombre del inquilino"/></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Fecha inicio *</label><input type="date" class="form-input" id="cont-inicio"/></div>
+          <div class="form-group"><label class="form-label">Fecha fin</label><input type="date" class="form-input" id="cont-fin"/></div>
+        </div>
+        <div class="form-group"><label class="form-label">Precio mensual ($)</label><input type="number" class="form-input" id="cont-precio" placeholder="0"/></div>
+        <div class="form-group"><label class="form-label">Notas</label><input type="text" class="form-input" id="cont-notas" placeholder="USD, IVA, condiciones especiales..."/></div>
+        <div id="msg-modal-cont" style="font-size:.8rem;margin-bottom:.75rem"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" onclick="guardarContrato()">Guardar</button>
+          <button class="btn" onclick="document.getElementById('modal-contrato').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal confirmación -->
+    <div id="modal-confirm-inm" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:380px">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:.5rem" id="confirm-inm-titulo"></div>
+        <div style="font-size:.85rem;color:var(--muted);margin-bottom:1.25rem" id="confirm-inm-msg"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" id="confirm-inm-btn" style="background:var(--danger);border-color:var(--danger)">Confirmar</button>
+          <button class="btn" onclick="document.getElementById('modal-confirm-inm').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  window._inmData={inm,contratosPorInmueble,alrt,cont,esGestor};
+
+  // Gráfico torta
+  setTimeout(()=>{
+    const ctx=document.getElementById('chart-inmuebles-torta');
+    if(!ctx||typeof Chart==='undefined') return;
+    const metrosOcupados=inm.filter(i=>contratosPorInmueble[i.id]&&i.metros).reduce((a,i)=>a+(i.metros||0),0);
+    const metrosVacios=inm.filter(i=>!contratosPorInmueble[i.id]&&i.metros).reduce((a,i)=>a+(i.metros||0),0);
+    const sinDatos=inm.filter(i=>!i.metros).length;
+    new Chart(ctx,{type:'doughnut',data:{labels:['Alquilados','Desocupados'],datasets:[{data:[metrosOcupados,metrosVacios],backgroundColor:['#2D5A3D','#E2DDD6'],borderColor:['#fff','#fff'],borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.label}: ${c.parsed.toLocaleString('es-AR')} m²`}}}}});
+    const leyEl=document.getElementById('torta-leyenda');
+    if(leyEl){
+      const total=metrosOcupados+metrosVacios;
+      leyEl.innerHTML=`
+        <div style="display:flex;align-items:center;gap:.6rem"><span style="width:12px;height:12px;background:#2D5A3D;border-radius:3px;flex-shrink:0;display:inline-block"></span><div><div style="font-size:.85rem;font-weight:500;color:var(--text)">Alquilados</div><div style="font-size:.78rem;color:var(--muted)">${metrosOcupados.toLocaleString('es-AR')} m² · ${total?Math.round(metrosOcupados/total*100):0}%</div></div></div>
+        <div style="display:flex;align-items:center;gap:.6rem"><span style="width:12px;height:12px;background:#E2DDD6;border:0.5px solid #B4B2A9;border-radius:3px;flex-shrink:0;display:inline-block"></span><div><div style="font-size:.85rem;font-weight:500;color:var(--text)">Desocupados</div><div style="font-size:.78rem;color:var(--muted)">${metrosVacios.toLocaleString('es-AR')} m² · ${total?Math.round(metrosVacios/total*100):0}%</div></div></div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:.25rem;padding-top:.5rem;border-top:0.5px solid var(--border)">Total: ${total.toLocaleString('es-AR')} m² · Sin datos: ${sinDatos}</div>`;
+    }
+  },200);
+}
 
   const inm=inmuebles||[];
   const cont=contratos||[];
@@ -2146,7 +2318,7 @@ async function renderInmuebles(){
   },200);
 }
 
-function renderInmActual(inm,contratosPorInmueble,alrt){
+function renderInmActual(inm,contratosPorInmueble,alrt,esGestor){
   return`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">
     ${inm.map(i=>{
       const c=contratosPorInmueble[i.id];
@@ -2156,7 +2328,6 @@ function renderInmActual(inm,contratosPorInmueble,alrt){
       let badgeClass=ocupado?'badge-ok':'badge-pend';
       let badgeLabel=ocupado?'Ocupado':'Desocupado';
       if(tieneAlerta&&a.tipo==='impago'){badgeClass='badge-late';badgeLabel='Incumplimiento';}
-
       return`<div class="puesto-card">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
           <div style="flex:1;min-width:0">
@@ -2172,16 +2343,106 @@ function renderInmActual(inm,contratosPorInmueble,alrt){
             ${c.fecha_fin?`<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Vence</span><span style="font-weight:500;${new Date(c.fecha_fin)<new Date(new Date().setDate(new Date().getDate()+60))?'color:var(--warning)':''}">${new Date(c.fecha_fin).toLocaleDateString('es-AR')}</span></div>`:''}
             ${c.notas?`<div style="color:var(--muted);font-size:.72rem;margin-top:2px">${c.notas}</div>`:''}
           </div>`:`<div style="font-size:.78rem;color:var(--muted)">Sin contrato activo</div>`}
-        ${a?`<div class="alert alert-danger" style="margin-top:.65rem;padding:.5rem .75rem;font-size:.75rem">
-          <i class="ti ti-alert-triangle" aria-hidden="true" style="font-size:13px"></i> ${a.descripcion}
-        </div>`:''}
-        ${['programador','coo','operativo'].includes(currentProfile.rol)?`
-        <div style="margin-top:.75rem;display:flex;gap:.4rem">
-          <button class="btn btn-sm" onclick="abrirReportarAlerta('${i.id}','${i.direccion.replace(/'/g,"\\'")}')">Reportar alerta</button>
-        </div>`:''}
+        ${a?`<div class="alert alert-danger" style="margin-top:.65rem;padding:.5rem .75rem;font-size:.75rem">${a.descripcion}</div>`:''}
+        <div style="margin-top:.75rem;display:flex;gap:.4rem;flex-wrap:wrap">
+          ${esGestor?`
+            <button class="btn btn-sm" onclick="editarInmueble('${i.id}','${i.direccion.replace(/'/g,"\\'")}','${i.localidad||''}',${i.metros||0},'${(i.descripcion||'').replace(/'/g,"\\'")}')">✏️ Editar</button>
+            ${!c?`<button class="btn btn-sm" onclick="abrirModalContrato('${i.id}','${i.direccion.replace(/'/g,"\\'")}')">+ Contrato</button>`:''}
+            <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="confirmarBajaInmueble('${i.id}','${i.direccion.replace(/'/g,"\\'")}')">Dar de baja</button>
+          `:`<button class="btn btn-sm" onclick="abrirReportarAlerta('${i.id}','${i.direccion.replace(/'/g,"\\'")}')">Reportar alerta</button>`}
+        </div>
       </div>`;
     }).join('')}
   </div>`;
+}
+
+// ── CRUD INMUEBLES ──
+function abrirModalInmueble(){
+  document.getElementById('modal-inm-titulo').textContent='Agregar inmueble';
+  document.getElementById('inm-edit-id').value='';
+  document.getElementById('inm-direccion').value='';
+  document.getElementById('inm-localidad').value='';
+  document.getElementById('inm-metros').value='';
+  document.getElementById('inm-descripcion').value='';
+  document.getElementById('msg-modal-inm').textContent='';
+  document.getElementById('modal-inmueble').style.display='flex';
+}
+
+function editarInmueble(id,direccion,localidad,metros,descripcion){
+  document.getElementById('modal-inm-titulo').textContent='Editar inmueble';
+  document.getElementById('inm-edit-id').value=id;
+  document.getElementById('inm-direccion').value=direccion;
+  document.getElementById('inm-localidad').value=localidad;
+  document.getElementById('inm-metros').value=metros||'';
+  document.getElementById('inm-descripcion').value=descripcion;
+  document.getElementById('msg-modal-inm').textContent='';
+  document.getElementById('modal-inmueble').style.display='flex';
+}
+
+function cerrarModalInmueble(){
+  document.getElementById('modal-inmueble').style.display='none';
+}
+
+async function guardarInmueble(){
+  const msgEl=document.getElementById('msg-modal-inm');
+  const id=document.getElementById('inm-edit-id').value;
+  const direccion=document.getElementById('inm-direccion').value.trim();
+  const localidad=document.getElementById('inm-localidad').value.trim();
+  const metros=parseFloat(document.getElementById('inm-metros').value)||null;
+  const descripcion=document.getElementById('inm-descripcion').value.trim();
+  if(!direccion){msgEl.textContent='La dirección es obligatoria.';msgEl.style.color='var(--danger)';return;}
+  msgEl.textContent='Guardando...';msgEl.style.color='var(--muted)';
+  let error;
+  if(id){
+    ({error}=await sb.from('inmuebles_urbanos').update({direccion,localidad,metros,descripcion}).eq('id',id));
+  }else{
+    ({error}=await sb.from('inmuebles_urbanos').insert({direccion,localidad,metros,descripcion,activo:true}));
+  }
+  if(error){msgEl.textContent='Error: '+error.message;msgEl.style.color='var(--danger)';}
+  else{cerrarModalInmueble();renderInmuebles();}
+}
+
+function confirmarBajaInmueble(id,direccion){
+  document.getElementById('confirm-inm-titulo').textContent='¿Dar de baja este inmueble?';
+  document.getElementById('confirm-inm-msg').textContent=`"${direccion}" quedará inactivo. No se borrarán sus contratos ni historial.`;
+  const btn=document.getElementById('confirm-inm-btn');
+  btn.onclick=async()=>{
+    await sb.from('inmuebles_urbanos').update({activo:false}).eq('id',id);
+    document.getElementById('modal-confirm-inm').style.display='none';
+    renderInmuebles();
+  };
+  document.getElementById('modal-confirm-inm').style.display='flex';
+}
+
+function abrirModalContrato(inmId,direccion){
+  document.getElementById('cont-inmueble-id').value=inmId;
+  document.getElementById('modal-cont-titulo').textContent='Agregar contrato';
+  document.getElementById('modal-cont-inmueble').textContent=direccion;
+  document.getElementById('cont-inquilino').value='';
+  document.getElementById('cont-inicio').value='';
+  document.getElementById('cont-fin').value='';
+  document.getElementById('cont-precio').value='';
+  document.getElementById('cont-notas').value='';
+  document.getElementById('msg-modal-cont').textContent='';
+  document.getElementById('modal-contrato').style.display='flex';
+}
+
+async function guardarContrato(){
+  const msgEl=document.getElementById('msg-modal-cont');
+  const inmId=document.getElementById('cont-inmueble-id').value;
+  const inquilino=document.getElementById('cont-inquilino').value.trim();
+  const inicio=document.getElementById('cont-inicio').value;
+  const fin=document.getElementById('cont-fin').value;
+  const precio=parseFloat(document.getElementById('cont-precio').value)||null;
+  const notas=document.getElementById('cont-notas').value.trim();
+  if(!inquilino||!inicio){msgEl.textContent='Inquilino y fecha de inicio son obligatorios.';msgEl.style.color='var(--danger)';return;}
+  msgEl.textContent='Guardando...';msgEl.style.color='var(--muted)';
+  const{error}=await sb.from('contratos_inmuebles').insert({
+    inmueble_id:inmId,inquilino,fecha_inicio:inicio,
+    fecha_fin:fin||null,precio_mensual:precio,notas,activo:true
+  });
+  if(error){msgEl.textContent='Error: '+error.message;msgEl.style.color='var(--danger)';}
+  else{document.getElementById('modal-contrato').style.display='none';renderInmuebles();}
 }
 
 function inmTab(tab,btn){
@@ -2189,7 +2450,7 @@ function inmTab(tab,btn){
   btn.classList.add('active');
   const{inm,contratosPorInmueble,alrt,cont}=window._inmData;
   const panel=document.getElementById('inm-panel');
-  if(tab==='actual') panel.innerHTML=renderInmActual(inm,contratosPorInmueble,alrt);
+  if(tab==='actual') panel.innerHTML=renderInmActual(inm,contratosPorInmueble,alrt,esGestor);
   if(tab==='todos') panel.innerHTML=renderInmTodos(inm,cont,alrt);
   if(tab==='nueva') panel.innerHTML=renderFormAlerta(inm);
 }

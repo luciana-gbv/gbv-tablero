@@ -2913,7 +2913,8 @@ async function renderAdmin(){
       <button class="tab-btn" onclick="adminTab('medidores',this)">Medidores</button>
       <button class="tab-btn" onclick="adminTab('puestos-admin',this)">Puestos</button>
     </div>
-    <div id="admin-panel">${renderAdminUsuarios(profiles||[])}</div>`;
+    <div id="admin-panel"></div>`;
+  document.getElementById('admin-panel').innerHTML=renderAdminUsuarios(profiles||[]);
 }
 
 function adminTab(tab,btn){

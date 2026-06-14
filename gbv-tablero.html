@@ -1625,8 +1625,13 @@ async function renderRRHH(){
   const pendientes=misEmpleados.filter(e=>!evalsPorEmpleado[e.id]||evalsPorEmpleado[e.id].every(ev=>ev.estado==='borrador')).length;
 
   main.innerHTML=`
-    <div class="section-heading">Recursos Humanos</div>
-    <div class="section-sub">Evaluaciones de desempeño · ${periodo.label}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+      <div>
+        <div class="section-heading" style="margin-bottom:2px">Recursos Humanos</div>
+        <div class="section-sub">Evaluaciones de desempeño · ${periodo.label}</div>
+      </div>
+      ${esDirectivo?`<button class="btn btn-accent" onclick="abrirModalEmpleado()">+ Agregar empleado</button>`:''}
+    </div>
 
     ${pendientes>0?`<div class="alert alert-warning" style="margin-bottom:1rem">
       ⏰ Tenés <strong>${pendientes} evaluación${pendientes>1?'es':''} pendiente${pendientes>1?'s':''}</strong> para el período ${periodo.label}
@@ -1635,9 +1640,61 @@ async function renderRRHH(){
     <div class="tab-row">
       <button class="tab-btn active" onclick="rrhhTab('evaluar',this)">Evaluar empleados</button>
       ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>
-      <button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button>`:''}
+      <button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button>
+      <button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button>`:''}
     </div>
     <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo)}</div>
+
+    <!-- Modal agregar/editar empleado -->
+    <div id="modal-empleado" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:1rem" id="modal-emp-titulo">Agregar empleado</div>
+        <input type="hidden" id="emp-edit-id"/>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Nombre *</label><input type="text" class="form-input" id="emp-nombre" placeholder="Nombre"/></div>
+          <div class="form-group"><label class="form-label">Apellido</label><input type="text" class="form-input" id="emp-apellido" placeholder="Apellido"/></div>
+        </div>
+        <div class="form-group"><label class="form-label">Área / Unidad de negocio</label><input type="text" class="form-input" id="emp-area" placeholder="Ej: Administración, Tandil, Corrientes..."/></div>
+        <div class="form-group"><label class="form-label">Puesto</label>
+          <select class="form-select" id="emp-puesto">
+            <option value="1">1 - Cobranzas, Ventas y Sueldos</option>
+            <option value="2">2 - Proveedores</option>
+            <option value="3">3 - Impuestos/Societario</option>
+            <option value="4">4 - Auxiliar Administración y Finanzas</option>
+            <option value="5">5 - Recepción y Secretaría</option>
+            <option value="6">6 - Asistente Comité Ejecutivo</option>
+            <option value="7">7 - Cabaña</option>
+            <option value="8">8 - Segundo Contador</option>
+            <option value="9_coo">9 - Segundo del COO</option>
+            <option value="coo">COO</option>
+            <option value="A_sur">Encargado - Buenos Aires</option>
+            <option value="A_norte">Encargado - Norte</option>
+            <option value="B">Escribiente</option>
+            <option value="C_sur">Capataz - Buenos Aires</option>
+            <option value="C_norte">Capataz - Norte</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Descripción del puesto</label><input type="text" class="form-input" id="emp-puesto-desc" placeholder="Ej: Contadora, Chofer, Puestero..."/></div>
+        <div class="form-group"><label class="form-label">Fecha de ingreso</label><input type="date" class="form-input" id="emp-ingreso"/></div>
+        <div id="msg-modal-emp" style="font-size:.8rem;margin-bottom:.75rem"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" onclick="guardarEmpleado()">Guardar</button>
+          <button class="btn" onclick="document.getElementById('modal-empleado').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal confirmación -->
+    <div id="modal-confirm-emp" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:380px">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:.5rem" id="confirm-emp-titulo"></div>
+        <div style="font-size:.85rem;color:var(--muted);margin-bottom:1.25rem" id="confirm-emp-msg"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" id="confirm-emp-btn" style="background:var(--danger);border-color:var(--danger)">Confirmar</button>
+          <button class="btn" onclick="document.getElementById('modal-confirm-emp').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+    </div>
   `;
   window._rrhhData={misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo};
 }
@@ -1685,6 +1742,88 @@ function rrhhTab(tab,btn){
   if(tab==='evaluar') panel.innerHTML=renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo);
   if(tab==='resumen') panel.innerHTML=renderRRHHResumen(todosEmpleados,evalsPorEmpleado,periodo);
   if(tab==='aprobar') panel.innerHTML=renderRRHHAprobar(todosEmpleados,evalsPorEmpleado,periodo);
+  if(tab==='personal') panel.innerHTML=renderRRHHPersonal(todosEmpleados);
+}
+
+function renderRRHHPersonal(empleados){
+  return`<div class="card">
+    <div class="card-title">Personal activo (${empleados.length})</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nombre</th><th>Puesto</th><th>Área</th><th>Ingreso</th><th>Acciones</th></tr></thead>
+      <tbody>${empleados.map(e=>`<tr>
+        <td><strong>${e.nombre} ${e.apellido||''}</strong></td>
+        <td style="color:var(--muted);font-size:.82rem">${e.puesto_descripcion||'—'}</td>
+        <td style="color:var(--muted)">${e.area||'—'}</td>
+        <td style="color:var(--muted)">${e.fecha_ingreso?new Date(e.fecha_ingreso).toLocaleDateString('es-AR'):'—'}</td>
+        <td>
+          <div style="display:flex;gap:.4rem">
+            <button class="btn btn-sm" onclick="editarEmpleado('${e.id}','${(e.nombre||'').replace(/'/g,"\\'")}','${(e.apellido||'').replace(/'/g,"\\'")}','${e.area||''}','${e.puesto_codigo||''}','${(e.puesto_descripcion||'').replace(/'/g,"\\'")}','${e.fecha_ingreso||''}')">✏️</button>
+            <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="confirmarBajaEmpleado('${e.id}','${(e.nombre||'')} ${(e.apellido||'')}')">Dar de baja</button>
+          </div>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+// ── CRUD PERSONAL ──
+function abrirModalEmpleado(){
+  document.getElementById('modal-emp-titulo').textContent='Agregar empleado';
+  document.getElementById('emp-edit-id').value='';
+  document.getElementById('emp-nombre').value='';
+  document.getElementById('emp-apellido').value='';
+  document.getElementById('emp-area').value='';
+  document.getElementById('emp-puesto').value='4';
+  document.getElementById('emp-puesto-desc').value='';
+  document.getElementById('emp-ingreso').value='';
+  document.getElementById('msg-modal-emp').textContent='';
+  document.getElementById('modal-empleado').style.display='flex';
+}
+
+function editarEmpleado(id,nombre,apellido,area,puesto,puestoDesc,ingreso){
+  document.getElementById('modal-emp-titulo').textContent='Editar empleado';
+  document.getElementById('emp-edit-id').value=id;
+  document.getElementById('emp-nombre').value=nombre;
+  document.getElementById('emp-apellido').value=apellido;
+  document.getElementById('emp-area').value=area;
+  document.getElementById('emp-puesto').value=puesto||'4';
+  document.getElementById('emp-puesto-desc').value=puestoDesc;
+  document.getElementById('emp-ingreso').value=ingreso;
+  document.getElementById('msg-modal-emp').textContent='';
+  document.getElementById('modal-empleado').style.display='flex';
+}
+
+async function guardarEmpleado(){
+  const msgEl=document.getElementById('msg-modal-emp');
+  const id=document.getElementById('emp-edit-id').value;
+  const nombre=document.getElementById('emp-nombre').value.trim();
+  const apellido=document.getElementById('emp-apellido').value.trim();
+  const area=document.getElementById('emp-area').value.trim();
+  const puesto=document.getElementById('emp-puesto').value;
+  const puestoDesc=document.getElementById('emp-puesto-desc').value.trim();
+  const ingreso=document.getElementById('emp-ingreso').value||null;
+  if(!nombre){msgEl.textContent='El nombre es obligatorio.';msgEl.style.color='var(--danger)';return;}
+  msgEl.textContent='Guardando...';msgEl.style.color='var(--muted)';
+  let error;
+  if(id){
+    ({error}=await sb.from('empleados').update({nombre,apellido,area,puesto_codigo:puesto,puesto_descripcion:puestoDesc,fecha_ingreso:ingreso}).eq('id',id));
+  }else{
+    ({error}=await sb.from('empleados').insert({nombre,apellido,area,puesto_codigo:puesto,puesto_descripcion:puestoDesc,fecha_ingreso:ingreso,activo:true}));
+  }
+  if(error){msgEl.textContent='Error: '+error.message;msgEl.style.color='var(--danger)';}
+  else{document.getElementById('modal-empleado').style.display='none';renderRRHH();}
+}
+
+function confirmarBajaEmpleado(id,nombre){
+  document.getElementById('confirm-emp-titulo').textContent='¿Dar de baja a este empleado?';
+  document.getElementById('confirm-emp-msg').textContent=`"${nombre}" quedará inactivo. No se borrará su historial de evaluaciones.`;
+  const btn=document.getElementById('confirm-emp-btn');
+  btn.onclick=async()=>{
+    await sb.from('empleados').update({activo:false}).eq('id',id);
+    document.getElementById('modal-confirm-emp').style.display='none';
+    renderRRHH();
+  };
+  document.getElementById('modal-confirm-emp').style.display='flex';
 }
 
 function renderRRHHResumen(empleados,evalsPorEmpleado,periodo){

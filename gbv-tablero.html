@@ -2638,11 +2638,16 @@ async function renderHistorico(){
             ${allIndicadores.map(i=>`<option value="${i.id}">${CAT_LABELS[i.categoria]||i.categoria} · ${i.nombre}</option>`).join('')}
           </select>
         </div>
-        <div class="form-group"><label class="form-label">Campo (opcional)</label>
-          <select class="form-select" id="hist-campo">
-            <option value="">Todos</option>
-            ${allCampos.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}
-          </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Campos (opcional — seleccioná uno o más)</label>
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;margin-top:.25rem">
+          <label style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;cursor:pointer">
+            <input type="checkbox" id="hist-campo-todos" checked onchange="toggleTodosCampos(this)"/> Todos
+          </label>
+          ${allCampos.map(c=>`<label style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;cursor:pointer">
+            <input type="checkbox" class="hist-campo-check" value="${c.id}" onchange="deseleccionarTodos()"/> ${c.nombre}
+          </label>`).join('')}
         </div>
       </div>
       <button class="btn btn-accent" onclick="loadHistorico()">Buscar</button>
@@ -2650,15 +2655,25 @@ async function renderHistorico(){
     <div id="hist-result"></div>`;
 }
 
+function toggleTodosCampos(el){
+  document.querySelectorAll('.hist-campo-check').forEach(c=>c.checked=false);
+}
+function deseleccionarTodos(){
+  document.getElementById('hist-campo-todos').checked=false;
+}
+
 async function loadHistorico(){
   const indId=document.getElementById('hist-ind').value;
-  const campoId=document.getElementById('hist-campo').value;
   const resEl=document.getElementById('hist-result');
-  if(!indId)return;
+  if(!indId) return;
   resEl.innerHTML='<div class="loading">Cargando...</div>';
 
+  // Obtener campos seleccionados
+  const todosMarcado=document.getElementById('hist-campo-todos')?.checked;
+  const camposSeleccionados=[...document.querySelectorAll('.hist-campo-check:checked')].map(c=>c.value);
+
   let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max,por_campo),campos(nombre,hectareas,unidades_negocio(nombre)),unidades_negocio(nombre),profiles(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:true});
-  if(campoId)query=query.eq('campo_id',campoId);
+  if(!todosMarcado&&camposSeleccionados.length>0) query=query.in('campo_id',camposSeleccionados);
   const{data:entries}=await query;
 
   if(!entries||entries.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay datos registrados.</div></div>';return;}

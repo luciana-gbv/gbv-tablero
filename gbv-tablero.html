@@ -1641,7 +1641,8 @@ async function renderRRHH(){
       <button class="tab-btn active" onclick="rrhhTab('evaluar',this)">Evaluar empleados</button>
       ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>
       <button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button>
-      <button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button>`:''}
+      <button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button>
+      <button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}
     </div>
     <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo)}</div>
 
@@ -1743,6 +1744,45 @@ function rrhhTab(tab,btn){
   if(tab==='resumen') panel.innerHTML=renderRRHHResumen(todosEmpleados,evalsPorEmpleado,periodo);
   if(tab==='aprobar') panel.innerHTML=renderRRHHAprobar(todosEmpleados,evalsPorEmpleado,periodo);
   if(tab==='personal') panel.innerHTML=renderRRHHPersonal(todosEmpleados);
+  if(tab==='archivados-emp') renderRRHHArchivados(panel);
+}
+
+async function renderRRHHArchivados(panel){
+  if(!panel) panel=document.getElementById('rrhh-panel');
+  panel.innerHTML='<div class="loading">Cargando...</div>';
+  const{data:archivados}=await sb.from('empleados').select('*').eq('activo',false).order('apellido');
+  if(!archivados||archivados.length===0){
+    panel.innerHTML=`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay empleados archivados.</div></div>`;
+    return;
+  }
+  panel.innerHTML=`<div class="card">
+    <div class="card-title">Empleados archivados (${archivados.length})</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:1rem">Estos empleados fueron dados de baja pero conservan su historial de evaluaciones.</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nombre</th><th>Puesto</th><th>Área</th><th>Acciones</th></tr></thead>
+      <tbody>${archivados.map(e=>`<tr>
+        <td><strong>${e.nombre} ${e.apellido||''}</strong></td>
+        <td style="color:var(--muted);font-size:.82rem">${e.puesto_descripcion||'—'}</td>
+        <td style="color:var(--muted)">${e.area||'—'}</td>
+        <td><button class="btn btn-sm" style="color:var(--success);border-color:var(--success)" onclick="confirmarReactivarEmpleado('${e.id}','${(e.nombre+' '+(e.apellido||'')).replace(/'/g,"\\'")}')">Reactivar</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function confirmarReactivarEmpleado(id, nombre){
+  document.getElementById('confirm-emp-titulo').textContent='¿Reactivar a este empleado?';
+  document.getElementById('confirm-emp-msg').textContent=`"${nombre}" volverá a aparecer en las evaluaciones y el listado de personal.`;
+  document.getElementById('confirm-emp-btn').textContent='Reactivar';
+  document.getElementById('confirm-emp-btn').style.background='var(--success)';
+  document.getElementById('confirm-emp-btn').style.borderColor='var(--success)';
+  const btn=document.getElementById('confirm-emp-btn');
+  btn.onclick=async()=>{
+    await sb.from('empleados').update({activo:true}).eq('id',id);
+    document.getElementById('modal-confirm-emp').style.display='none';
+    renderRRHH();
+  };
+  document.getElementById('modal-confirm-emp').style.display='flex';
 }
 
 function renderRRHHPersonal(empleados){
@@ -2230,6 +2270,7 @@ async function renderInmuebles(){
       <button class="tab-btn active" onclick="inmTab('actual',this)">Situación actual</button>
       <button class="tab-btn" onclick="inmTab('todos',this)">Todos los inmuebles</button>
       ${['programador','coo','operativo'].includes(currentProfile.rol)?`<button class="tab-btn" onclick="inmTab('nueva',this)">+ Reportar alerta</button>`:''}
+      ${esGestor?`<button class="tab-btn" onclick="inmTab('archivados',this)">Archivados</button>`:''}
     </div>
     <div id="inm-panel">${renderInmActual(inm,contratosPorInmueble,alrt,esGestor)}</div>
 
@@ -2478,6 +2519,45 @@ function inmTab(tab,btn){
   if(tab==='actual') panel.innerHTML=renderInmActual(inm,contratosPorInmueble,alrt,esGestor);
   if(tab==='todos') panel.innerHTML=renderInmTodos(inm,cont,alrt);
   if(tab==='nueva') panel.innerHTML=renderFormAlerta(inm);
+  if(tab==='archivados') renderInmArchivados(panel);
+}
+
+async function renderInmArchivados(panel){
+  if(!panel) panel=document.getElementById('inm-panel');
+  panel.innerHTML='<div class="loading">Cargando...</div>';
+  const{data:archivados}=await sb.from('inmuebles_urbanos').select('*').eq('activo',false).eq('tipo','inmueble').order('direccion');
+  if(!archivados||archivados.length===0){
+    panel.innerHTML=`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay inmuebles archivados.</div></div>`;
+    return;
+  }
+  panel.innerHTML=`<div class="card">
+    <div class="card-title">Inmuebles archivados (${archivados.length})</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:1rem">Estos inmuebles fueron dados de baja pero conservan su historial completo.</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Dirección</th><th>Localidad</th><th>M²</th><th>Acciones</th></tr></thead>
+      <tbody>${archivados.map(i=>`<tr>
+        <td><strong>${i.direccion}</strong></td>
+        <td style="color:var(--muted)">${i.localidad||'—'}</td>
+        <td>${i.metros||'—'}</td>
+        <td><button class="btn btn-sm" style="color:var(--success);border-color:var(--success)" onclick="confirmarReactivarInmueble('${i.id}','${i.direccion.replace(/'/g,"\\'")}')">Reactivar</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function confirmarReactivarInmueble(id, direccion){
+  document.getElementById('confirm-inm-titulo').textContent='¿Reactivar este inmueble?';
+  document.getElementById('confirm-inm-msg').textContent=`"${direccion}" volverá a aparecer en los informes de situación actual.`;
+  document.getElementById('confirm-inm-btn').textContent='Reactivar';
+  document.getElementById('confirm-inm-btn').style.background='var(--success)';
+  document.getElementById('confirm-inm-btn').style.borderColor='var(--success)';
+  const btn=document.getElementById('confirm-inm-btn');
+  btn.onclick=async()=>{
+    await sb.from('inmuebles_urbanos').update({activo:true}).eq('id',id);
+    document.getElementById('modal-confirm-inm').style.display='none';
+    renderInmuebles();
+  };
+  document.getElementById('modal-confirm-inm').style.display='flex';
 }
 
 function renderInmTodos(inm,cont,alrt){

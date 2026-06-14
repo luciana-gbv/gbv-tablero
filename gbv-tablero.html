@@ -2284,9 +2284,9 @@ async function renderInmuebles(){
   window._inmData={inm,contratosPorInmueble,alrt,cont,esGestor};
 
   // Gráfico torta
-  setTimeout(()=>{
+  const renderTorta=()=>{
     const ctx=document.getElementById('chart-inmuebles-torta');
-    if(!ctx||typeof Chart==='undefined') return;
+    if(!ctx||typeof Chart==='undefined'){setTimeout(renderTorta,300);return;}
     const metrosOcupados=inm.filter(i=>contratosPorInmueble[i.id]&&i.metros).reduce((a,i)=>a+(i.metros||0),0);
     const metrosVacios=inm.filter(i=>!contratosPorInmueble[i.id]&&i.metros).reduce((a,i)=>a+(i.metros||0),0);
     const sinDatos=inm.filter(i=>!i.metros).length;
@@ -2299,7 +2299,8 @@ async function renderInmuebles(){
         <div style="display:flex;align-items:center;gap:.6rem"><span style="width:12px;height:12px;background:#E2DDD6;border:0.5px solid #B4B2A9;border-radius:3px;flex-shrink:0;display:inline-block"></span><div><div style="font-size:.85rem;font-weight:500;color:var(--text)">Desocupados</div><div style="font-size:.78rem;color:var(--muted)">${metrosVacios.toLocaleString('es-AR')} m² · ${total?Math.round(metrosVacios/total*100):0}%</div></div></div>
         <div style="font-size:.75rem;color:var(--muted);margin-top:.25rem;padding-top:.5rem;border-top:0.5px solid var(--border)">Total: ${total.toLocaleString('es-AR')} m² · Sin datos: ${sinDatos}</div>`;
     }
-  },200);
+  };
+  setTimeout(renderTorta,300);
 }
 
 function renderInmActual(inm,contratosPorInmueble,alrt,esGestor){

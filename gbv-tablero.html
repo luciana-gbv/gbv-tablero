@@ -2131,7 +2131,9 @@ async function renderInmuebles(){
     sb.from('alertas_inmuebles').select('*,profiles(nombre,apellido)').eq('resuelta',false).order('created_at',{ascending:false})
   ]);
 
-  const inm=inmuebles||[];
+  const todos=inmuebles||[];
+  const inm=todos.filter(i=>i.tipo!=='cochera');
+  const cocheras=todos.filter(i=>i.tipo==='cochera');
   const cont=contratos||[];
   const alrt=alertas||[];
 
@@ -2231,6 +2233,28 @@ async function renderInmuebles(){
     </div>
     <div id="inm-panel">${renderInmActual(inm,contratosPorInmueble,alrt,esGestor)}</div>
 
+    ${cocheras.length>0?`
+    <div class="card" style="margin-top:1.5rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <div class="card-title" style="margin:0">🅿️ Cocheras (${cocheras.length})</div>
+        <div style="font-size:.78rem;color:var(--muted)">${cocheras.filter(c=>contratosPorInmueble[c.id]).length} ocupadas · ${cocheras.filter(c=>!contratosPorInmueble[c.id]).length} libres</div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Cochera</th><th>Localidad</th><th>Inquilino</th><th>Alquiler</th><th>Estado</th></tr></thead>
+        <tbody>${cocheras.map(c=>{
+          const cont=contratosPorInmueble[c.id];
+          const ocupada=!!cont;
+          return`<tr>
+            <td><strong>${c.direccion}</strong></td>
+            <td style="color:var(--muted)">${c.localidad||'—'}</td>
+            <td>${cont?.inquilino||'—'}</td>
+            <td>${cont?.precio_mensual?'$'+cont.precio_mensual.toLocaleString('es-AR'):cont?.notas||'—'}</td>
+            <td>${ocupada?'<span class="badge badge-ok">Ocupada</span>':'<span class="badge badge-pend">Libre</span>'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`:''}
+
     <!-- Modal agregar/editar inmueble -->
     <div id="modal-inmueble" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
       <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
@@ -2281,7 +2305,7 @@ async function renderInmuebles(){
       </div>
     </div>
   `;
-  window._inmData={inm,contratosPorInmueble,alrt,cont,esGestor};
+  window._inmData={inm,contratosPorInmueble,alrt,cont,esGestor,cocheras};
 
   // Gráfico torta
   const renderTorta=()=>{

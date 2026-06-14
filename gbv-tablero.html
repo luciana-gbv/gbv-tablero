@@ -2696,12 +2696,62 @@ async function loadHistorico(){
     </div>`;
   }
 
-  const labels=entriesConValor.map(e=>e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'short',year:'2-digit'}):'—');
-  const dataVals=entriesConValor.map(e=>e.valor);
+  // Tabla comparativa entre años
+  const anios=[...new Set(entries.map(e=>e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').getFullYear():null).filter(Boolean))].sort();
+  let tablaComparativaHtml='';
+  if(anios.length>1){
+    // Agrupar por mes/período dentro de cada año
+    const porAnio={};
+    anios.forEach(a=>porAnio[a]={});
+    entries.forEach(e=>{
+      if(!e.periodo_fecha||e.valor===null) return;
+      const d=new Date(e.periodo_fecha+'T12:00:00');
+      const anio=d.getFullYear();
+      const mesKey=d.toLocaleDateString('es-AR',{month:'short'});
+      if(!porAnio[anio]) porAnio[anio]={};
+      porAnio[anio][mesKey]=e.valor;
+    });
+    const todosLosMeses=[...new Set(entries.filter(e=>e.periodo_fecha).map(e=>new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR',{month:'short'})))];
+
+    tablaComparativaHtml=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Comparativa entre años · ${indData?.nombre||'Indicador'}</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Período</th>${anios.map(a=>`<th style="text-align:right">${a}</th>`).join('')}<th style="text-align:right;color:var(--muted)">Variación</th></tr></thead>
+        <tbody>${todosLosMeses.map(mes=>{
+          const vals=anios.map(a=>porAnio[a]?.[mes]??null);
+          const tieneValores=vals.some(v=>v!==null);
+          if(!tieneValores) return'';
+          // Calcular variación entre primer y último año con dato
+          const valsConDato=vals.filter(v=>v!==null);
+          const variacion=valsConDato.length>1?((valsConDato[valsConDato.length-1]-valsConDato[0])/Math.abs(valsConDato[0])*100).toFixed(1):null;
+          return`<tr>
+            <td style="font-weight:500">${mes}</td>
+            ${vals.map(v=>`<td style="text-align:right;${v===null?'color:var(--muted)':''}">${v!==null?v.toLocaleString('es-AR'):'—'}</td>`).join('')}
+            <td style="text-align:right;font-weight:500;color:${variacion===null?'var(--muted)':parseFloat(variacion)>0?'var(--success)':'var(--danger)'}">
+              ${variacion!==null?(parseFloat(variacion)>0?'↑':'↓')+Math.abs(parseFloat(variacion))+'%':'—'}
+            </td>
+          </tr>`;
+        }).join('')}
+        <tr style="border-top:2px solid var(--border);background:var(--bg)">
+          <td style="font-weight:500">Promedio</td>
+          ${anios.map(a=>{
+            const vs=Object.values(porAnio[a]||{}).filter(v=>v!==null);
+            const prom=vs.length?(vs.reduce((a,b)=>a+b,0)/vs.length).toFixed(2):null;
+            return`<td style="text-align:right;font-weight:500">${prom??'—'}</td>`;
+          }).join('')}
+          <td></td>
+        </tr>
+        </tbody>
+      </table></div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:.5rem">Variación calculada entre el primer y último año con datos disponibles.</div>
+    </div>`;
+  }
   const mediaNum=parseFloat(media);
 
   resEl.innerHTML=`
     ${consolidadoHtml}
+    ${tablaComparativaHtml}
     <div class="metrics-grid" style="margin-bottom:1rem">
       <div class="metric-card"><div class="metric-label">Registros</div><div class="metric-value">${entries.length}</div></div>
       <div class="metric-card"><div class="metric-label">Promedio</div><div class="metric-value">${media??'—'}</div><div class="metric-sub neutral">${indData?.unidad_medida||''}</div></div>

@@ -2922,37 +2922,143 @@ function adminTab(tab,btn){
   const{profiles,rodados,medidores,puestos}=window._adminData;
   const panel=document.getElementById('admin-panel');
   if(tab==='usuarios')panel.innerHTML=renderAdminUsuarios(profiles||[]);
-  if(tab==='campos')panel.innerHTML=renderAdminCampos();
+  if(tab==='campos')renderAdminCampos(panel);
   if(tab==='rodados')panel.innerHTML=renderAdminRodados(rodados||[]);
   if(tab==='medidores')panel.innerHTML=renderAdminMedidores(medidores||[]);
   if(tab==='puestos-admin')panel.innerHTML=renderAdminPuestosTable(puestos||[]);
 }
 
-function renderAdminUsuarios(profiles){
-  return`<div class="card"><div class="card-title">Usuarios (${profiles.length})</div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th></tr></thead>
-      <tbody>${profiles.map(p=>`<tr>
-        <td>${p.nombre||''} ${p.apellido||''} ${p.iniciales?`<span class="badge badge-na">${p.iniciales}</span>`:''}</td>
-        <td style="color:var(--muted)">${p.email}</td>
-        <td><span class="badge badge-ok">${ROL_LABELS[p.rol]||p.rol}</span></td>
-        <td>${p.activo?'<span class="badge badge-ok">Activo</span>':'<span class="badge badge-late">Inactivo</span>'}</td>
-      </tr>`).join('')}</tbody>
-    </table></div></div>`;
+async function renderAdminCampos(panel){
+  if(!panel) panel=document.getElementById('admin-panel');
+  panel.innerHTML='<div class="loading">Cargando...</div>';
+  const anio=new Date().getFullYear();
+  const{data:historico}=await sb.from('campos_hectareas_historico').select('*').eq('anio',anio);
+  const histPorCampo={};
+  (historico||[]).forEach(h=>{histPorCampo[h.campo_id]=h;});
+
+  panel.innerHTML=`
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <div class="card-title" style="margin:0">Campos por unidad de negocio</div>
+        <div style="font-size:.78rem;color:var(--muted)">Hectáreas por tipo · año ${anio}</div>
+      </div>
+      ${allUnidades.map(u=>{
+        const uc=allCampos.filter(c=>c.unidad_negocio_id===u.id);
+        if(uc.length===0) return`<div style="margin-bottom:1rem"><div style="font-weight:500;font-size:.88rem;color:var(--muted)">${u.nombre} — sin campos</div></div>`;
+        return`<div style="margin-bottom:1.25rem">
+          <div style="font-weight:500;font-size:.88rem;margin-bottom:.5rem;color:var(--accent)">${u.nombre}</div>
+          ${uc.map(c=>{
+            const h=histPorCampo[c.id];
+            const haTotal=c.hectareas||0;
+            const cargado=!!h;
+            return`<div style="padding:.6rem 0;border-bottom:1px solid var(--border)">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+                <div style="font-size:.85rem;font-weight:500">${c.nombre}</div>
+                <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                  <span style="font-size:.75rem;color:var(--muted)">${haTotal.toLocaleString('es-AR')} ha totales</span>
+                  ${cargado?`
+                    <span style="font-size:.72rem;background:#E8F5EC;color:#1A4A2A;padding:2px 7px;border-radius:var(--radius)">🐄 ${h.hectareas_ganaderas?.toLocaleString('es-AR')||'—'} ha</span>
+                    <span style="font-size:.72rem;background:#FEF3CD;color:#7A5A00;padding:2px 7px;border-radius:var(--radius)">🌾 ${h.hectareas_agricolas?.toLocaleString('es-AR')||'—'} ha</span>
+                    <span style="font-size:.72rem;background:#F5F3EE;color:var(--muted);padding:2px 7px;border-radius:var(--radius)">⬜ ${h.hectareas_improductivas?.toLocaleString('es-AR')||'—'} ha</span>
+                  `:`<span style="font-size:.72rem;color:var(--warning)">Sin datos ${anio}</span>`}
+                  <button class="btn btn-sm" onclick="abrirModalHa('${c.id}','${c.nombre.replace(/'/g,"\\'")}',${haTotal},'${h?.id||''}',${h?.hectareas_ganaderas||0},${h?.hectareas_agricolas||0},${h?.hectareas_improductivas||0},'${(h?.notas||'').replace(/'/g,"\\'")}')">
+                    ${cargado?'✏️ Editar':'+ Cargar'}
+                  </button>
+                  ${cargado?`<button class="btn btn-sm" onclick="verHistoricoHa('${c.id}','${c.nombre.replace(/'/g,"\\'")}')">📋 Historial</button>`:''}
+                </div>
+              </div>
+              ${h?.notas?`<div style="font-size:.72rem;color:var(--muted);margin-top:2px">Nota: ${h.notas}</div>`:''}
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Modal cargar/editar hectáreas -->
+    <div id="modal-ha" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:440px">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:.25rem" id="modal-ha-titulo"></div>
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:1rem" id="modal-ha-sub"></div>
+        <input type="hidden" id="ha-campo-id"/>
+        <input type="hidden" id="ha-hist-id"/>
+        <div class="form-group"><label class="form-label">🐄 Hectáreas ganaderas</label><input type="number" class="form-input" id="ha-ganaderas" placeholder="0" step="0.01" oninput="calcHaResto()"/></div>
+        <div class="form-group"><label class="form-label">🌾 Hectáreas agrícolas</label><input type="number" class="form-input" id="ha-agricolas" placeholder="0" step="0.01" oninput="calcHaResto()"/></div>
+        <div class="form-group"><label class="form-label">⬜ Hectáreas improductivas</label><input type="number" class="form-input" id="ha-improductivas" placeholder="0" step="0.01" oninput="calcHaResto()"/></div>
+        <div id="ha-resto" style="font-size:.8rem;margin-bottom:.75rem;padding:.5rem .75rem;border-radius:var(--radius);background:var(--bg)"></div>
+        <div class="form-group"><label class="form-label">Notas (opcional)</label><input type="text" class="form-input" id="ha-notas" placeholder="Ej: cambio por inundación sector norte"/></div>
+        <div id="msg-modal-ha" style="font-size:.8rem;margin-bottom:.75rem"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" onclick="guardarHa()">Guardar</button>
+          <button class="btn" onclick="document.getElementById('modal-ha').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal historial -->
+    <div id="modal-hist-ha" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:560px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:1rem" id="modal-hist-ha-titulo"></div>
+        <div id="modal-hist-ha-content"><div class="loading">Cargando...</div></div>
+        <button class="btn" style="margin-top:1rem" onclick="document.getElementById('modal-hist-ha').style.display='none'">Cerrar</button>
+      </div>
+    </div>`;
 }
 
-function renderAdminCampos(){
-  return`<div class="card"><div class="card-title">Campos por unidad de negocio</div>
-    ${allUnidades.map(u=>{
-      const uc=allCampos.filter(c=>c.unidad_negocio_id===u.id);
-      return`<div style="margin-bottom:1rem">
-        <div style="font-weight:500;font-size:.88rem;margin-bottom:.5rem">${u.nombre}</div>
-        ${uc.map(c=>`<div style="display:flex;align-items:center;gap:.75rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.83rem">
-          <span style="flex:1">${c.nombre}</span>
-          <span style="color:var(--muted)">${c.hectareas?c.hectareas.toLocaleString('es-AR')+' ha':'sin ha'}</span>
-        </div>`).join('')}
-      </div>`;
-    }).join('')}</div>`;
+let _haTotal=0;
+function abrirModalHa(campoId,nombre,haTotal,histId,haGan,haAgr,haImp,notas){
+  _haTotal=haTotal;
+  document.getElementById('modal-ha-titulo').textContent=(histId?'Editar':'Cargar')+' hectáreas · '+nombre;
+  document.getElementById('modal-ha-sub').textContent='Año '+new Date().getFullYear()+' · '+haTotal.toLocaleString('es-AR')+' ha totales';
+  document.getElementById('ha-campo-id').value=campoId;
+  document.getElementById('ha-hist-id').value=histId;
+  document.getElementById('ha-ganaderas').value=haGan||'';
+  document.getElementById('ha-agricolas').value=haAgr||'';
+  document.getElementById('ha-improductivas').value=haImp||'';
+  document.getElementById('ha-notas').value=notas||'';
+  document.getElementById('msg-modal-ha').textContent='';
+  calcHaResto();
+  document.getElementById('modal-ha').style.display='flex';
+}
+
+function calcHaResto(){
+  const gan=parseFloat(document.getElementById('ha-ganaderas').value)||0;
+  const agr=parseFloat(document.getElementById('ha-agricolas').value)||0;
+  const imp=parseFloat(document.getElementById('ha-improductivas').value)||0;
+  const suma=gan+agr+imp;
+  const resto=_haTotal-suma;
+  const el=document.getElementById('ha-resto');
+  if(!el) return;
+  const ok=Math.abs(resto)<0.1;
+  el.innerHTML='Suma: <strong>'+suma.toLocaleString('es-AR')+' ha</strong> de '+_haTotal.toLocaleString('es-AR')+' ha totales · <span style="color:'+(ok?'var(--success)':resto<0?'var(--danger)':'var(--warning)')+'">'+( ok?'✓ Cuadra perfecto':resto>0?'Faltan '+resto.toLocaleString('es-AR')+' ha':'Excede por '+Math.abs(resto).toLocaleString('es-AR')+' ha')+'</span>';
+}
+
+async function guardarHa(){
+  const msgEl=document.getElementById('msg-modal-ha');
+  const campoId=document.getElementById('ha-campo-id').value;
+  const histId=document.getElementById('ha-hist-id').value;
+  const haGan=parseFloat(document.getElementById('ha-ganaderas').value)||null;
+  const haAgr=parseFloat(document.getElementById('ha-agricolas').value)||null;
+  const haImp=parseFloat(document.getElementById('ha-improductivas').value)||null;
+  const notas=document.getElementById('ha-notas').value.trim();
+  const anio=new Date().getFullYear();
+  msgEl.textContent='Guardando...';msgEl.style.color='var(--muted)';
+  let error;
+  if(histId){
+    ({error}=await sb.from('campos_hectareas_historico').update({hectareas_ganaderas:haGan,hectareas_agricolas:haAgr,hectareas_improductivas:haImp,notas,user_id:currentUser.id}).eq('id',histId));
+  } else {
+    ({error}=await sb.from('campos_hectareas_historico').insert({campo_id:campoId,anio,hectareas_ganaderas:haGan,hectareas_agricolas:haAgr,hectareas_improductivas:haImp,notas,user_id:currentUser.id}));
+  }
+  if(error){msgEl.textContent='Error: '+error.message;msgEl.style.color='var(--danger)';}
+  else{document.getElementById('modal-ha').style.display='none';renderAdminCampos();}
+}
+
+async function verHistoricoHa(campoId,nombre){
+  document.getElementById('modal-hist-ha-titulo').textContent='Historial de hectáreas · '+nombre;
+  document.getElementById('modal-hist-ha').style.display='flex';
+  const el=document.getElementById('modal-hist-ha-content');
+  const{data:hist}=await sb.from('campos_hectareas_historico').select('*,profiles(nombre,apellido)').eq('campo_id',campoId).order('anio',{ascending:false});
+  if(!hist||hist.length===0){el.innerHTML='<div style="color:var(--muted);text-align:center;padding:1rem">Sin registros históricos.</div>';return;}
+  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Año</th><th>🐄 Ganaderas</th><th>🌾 Agrícolas</th><th>⬜ Improductivas</th><th>Notas</th><th>Cargado por</th></tr></thead><tbody>'+hist.map(h=>'<tr><td><strong>'+h.anio+'</strong></td><td>'+(h.hectareas_ganaderas?.toLocaleString('es-AR')||'—')+' ha</td><td>'+(h.hectareas_agricolas?.toLocaleString('es-AR')||'—')+' ha</td><td>'+(h.hectareas_improductivas?.toLocaleString('es-AR')||'—')+' ha</td><td style="color:var(--muted);font-size:.78rem">'+(h.notas||'—')+'</td><td style="color:var(--muted);font-size:.78rem">'+((h.profiles?.nombre||'')+' '+(h.profiles?.apellido||''))+'</td></tr>').join('')+'</tbody></table></div>';
 }
 
 function renderAdminRodados(rodados){

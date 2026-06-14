@@ -2929,6 +2929,19 @@ function adminTab(tab,btn){
   if(tab==='puestos-admin')panel.innerHTML=renderAdminPuestosTable(puestos||[]);
 }
 
+function renderAdminUsuarios(profiles){
+  return`<div class="card"><div class="card-title">Usuarios (${profiles.length})</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th></tr></thead>
+      <tbody>${profiles.map(p=>`<tr>
+        <td>${p.nombre||''} ${p.apellido||''} ${p.iniciales?`<span class="badge badge-na">${p.iniciales}</span>`:''}</td>
+        <td style="color:var(--muted)">${p.email}</td>
+        <td><span class="badge badge-ok">${ROL_LABELS[p.rol]||p.rol}</span></td>
+        <td>${p.activo?'<span class="badge badge-ok">Activo</span>':'<span class="badge badge-late">Inactivo</span>'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div></div>`;
+}
+
 async function renderAdminCampos(panel){
   if(!panel) panel=document.getElementById('admin-panel');
   panel.innerHTML='<div class="loading">Cargando...</div>';

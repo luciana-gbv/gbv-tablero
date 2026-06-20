@@ -166,8 +166,18 @@ const SUPA_KEY='sb_publishable_Wcf8KQPElBsMKmRF3kaD8Q_o7k5dXGT';
 const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
 let currentUser=null,currentProfile=null,currentTab='resumen';
 let allCampos=[],allUnidades=[],allIndicadores=[],misCampos=[];
+let currentPermisos={};
 let selectedCampo=null,selectedCat=null;
-const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo',hacienda:'Hacienda'};
+const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo',hacienda:'Hacienda',directorio_lectura:'Directorio (solo lectura)'};
+
+function puedeEditar(modulo){
+  if(currentProfile?.rol==='programador')return true; // failsafe: programador siempre puede, sin depender de la tabla
+  return !!currentPermisos[modulo]?.puede_editar;
+}
+function puedeVer(modulo){
+  if(currentProfile?.rol==='programador')return true;
+  return !!currentPermisos[modulo]?.puede_ver;
+}
 const CAT_LABELS={gestion:'Gestión',financiero:'Financiero',comercial:'Comercial',productivo_global:'Productivo · Global',productivo_cria:'Productivo · Cría',productivo_recria:'Productivo · Recría',productivo_feedlot:'Productivo · Feedlot',alimenticio:'Alimenticio',sanitario:'Sanitario',mejoramiento_genetico:'Mejoramiento genético',ecologia:'Ecología',rrhh:'RRHH',inmuebles_urbanos:'Inmuebles Urbanos'};
 const CAT_ICONS={gestion:'📋',financiero:'📊',comercial:'📈',productivo_global:'🐄',productivo_cria:'🐮',productivo_recria:'🐂',productivo_feedlot:'🌽',alimenticio:'🌾',sanitario:'💉',mejoramiento_genetico:'🧬',ecologia:'🌿',rrhh:'👥',inmuebles_urbanos:'🏢'};
 
@@ -228,6 +238,9 @@ async function initApp(user){
     sb.from('indicadores').select('*').eq('activo',true).order('orden')
   ]);
   allCampos=campos||[];allUnidades=unidades||[];allIndicadores=indicadores||[];
+  const{data:permisos}=await sb.from('permisos_rol').select('modulo,puede_ver,puede_editar').eq('rol',currentProfile.rol);
+  currentPermisos={};
+  (permisos||[]).forEach(p=>{currentPermisos[p.modulo]={puede_ver:p.puede_ver,puede_editar:p.puede_editar};});
   if(currentProfile.rol==='encargado_campo'){
     const{data:asignados}=await sb.from('encargados_campo').select('campo_id').eq('user_id',user.id).eq('activo',true);
     const ids=(asignados||[]).map(a=>a.campo_id);
@@ -305,7 +318,7 @@ async function mostrarAlertas(){
 
   // Para directorio/COO: ver si hay evaluaciones sin aprobar
   let sinAprobar=0;
-  if(['programador','directorio','coo'].includes(currentProfile.rol)&&(esSemanaCercaJunio||esSemanaCercaDic)){
+  if(puedeEditar('rrhh')&&['programador','directorio','coo'].includes(currentProfile.rol)&&(esSemanaCercaJunio||esSemanaCercaDic)){
     const{data:enviadas}=await sb.from('evaluaciones')
       .select('id').eq('periodo',periodoRRHH).eq('estado','enviado');
     sinAprobar=(enviadas||[]).length;
@@ -359,15 +372,15 @@ async function mostrarAlertas(){
 }
 
 const TAB_DEFS=[
-  {id:'resumen',label:'Resumen',roles:['programador','directorio','coo','operativo','encargado_campo']},
+  {id:'resumen',label:'Resumen',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
   {id:'carga',label:'Carga de datos',roles:['programador','coo','operativo','encargado_campo']},
-  {id:'calendario',label:'Calendario',roles:['programador','directorio','coo','operativo','encargado_campo']},
-  {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo']},
-  {id:'inmuebles',label:'Inmuebles',roles:['programador','directorio','coo','operativo']},
-  {id:'rrhh',label:'RRHH',roles:['programador','directorio','coo','operativo','encargado_campo']},
-  {id:'puestos',label:'Puestos',roles:['programador','directorio','coo']},
-  {id:'historico',label:'Históricos',roles:['programador','directorio','coo','operativo']},
-  {id:'hacienda',label:'Planillas de hacienda',roles:['programador','directorio','coo','operativo','hacienda']},
+  {id:'calendario',label:'Calendario',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
+  {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo','directorio_lectura']},
+  {id:'inmuebles',label:'Inmuebles',roles:['programador','directorio','coo','operativo','directorio_lectura']},
+  {id:'rrhh',label:'RRHH',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
+  {id:'puestos',label:'Puestos',roles:['programador','directorio','coo','directorio_lectura']},
+  {id:'historico',label:'Históricos',roles:['programador','directorio','coo','operativo','directorio_lectura']},
+  {id:'hacienda',label:'Planillas de hacienda',roles:['programador','directorio','coo','operativo','hacienda','directorio_lectura']},
   {id:'admin',label:'Administración',roles:['programador','coo']},
 ];
 
@@ -1603,7 +1616,8 @@ function getPeriodoActual(){
 async function renderRRHH(){
   const main=document.getElementById('main-content');
   main.innerHTML='<div class="loading">Cargando...</div>';
-  const esDirectivo=['programador','directorio','coo'].includes(currentProfile.rol);
+  const esDirectivo=['programador','directorio','coo','directorio_lectura'].includes(currentProfile.rol);
+  const puedeEditarRRHH=puedeEditar('rrhh');
 
   // Cargar empleados que corresponden según rol
   let query=sb.from('empleados').select('*').eq('activo',true).order('apellido');
@@ -1634,7 +1648,7 @@ async function renderRRHH(){
         <div class="section-heading" style="margin-bottom:2px">Recursos Humanos</div>
         <div class="section-sub">Evaluaciones de desempeño · ${periodo.label}</div>
       </div>
-      ${esDirectivo?`<button class="btn btn-accent" onclick="abrirModalEmpleado()">+ Agregar empleado</button>`:''}
+      ${puedeEditarRRHH?`<button class="btn btn-accent" onclick="abrirModalEmpleado()">+ Agregar empleado</button>`:''}
     </div>
 
     ${pendientes>0?`<div class="alert alert-warning" style="margin-bottom:1rem">
@@ -1643,10 +1657,7 @@ async function renderRRHH(){
 
     <div class="tab-row">
       <button class="tab-btn active" onclick="rrhhTab('evaluar',this)">Evaluar empleados</button>
-      ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>
-      <button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button>
-      <button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button>
-      <button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}
+      ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>${puedeEditarRRHH?`<button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button><button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button><button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}`:''}
     </div>
     <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo)}</div>
 
@@ -2167,7 +2178,7 @@ async function guardarEvaluacion(empleadoId, puesto, esLider, estado){
 async function renderInmuebles(){
   const main=document.getElementById('main-content');
   main.innerHTML='<div class="loading">Cargando...</div>';
-  const esGestor=['programador','operativo'].includes(currentProfile.rol);
+  const esGestor=puedeEditar('inmuebles');
 
   const[{data:inmuebles},{data:contratos},{data:alertas}]=await Promise.all([
     sb.from('inmuebles_urbanos').select('*').eq('activo',true).order('direccion'),
@@ -2691,7 +2702,7 @@ async function renderHistorico(){
   const main=document.getElementById('main-content');
   const anioActual=new Date().getFullYear();
   const anios=[anioActual, anioActual-1, anioActual-2, anioActual-3];
-  const esDirectivo=['programador','directorio','coo'].includes(currentProfile.rol);
+  const esDirectivo=['programador','directorio','coo','directorio_lectura'].includes(currentProfile.rol);
 
   main.innerHTML=`
     <div class="section-heading">Históricos</div>

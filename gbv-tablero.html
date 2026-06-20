@@ -3435,7 +3435,7 @@ async function hacMostrarPreview(){
 
   // Traer histórico para calcular el total del período anterior, por campo+rodeo
   const{data:historicoTodo}=await sb.from('hacienda_historico')
-    .select('periodo,campo,rodeo,cantidad');
+    .select('periodo,campo,rodeo,cantidad').range(0,19999);
   const totalesPorClave={};
   (historicoTodo||[]).forEach(r=>{
     const clave=r.campo+'|'+r.rodeo;
@@ -3613,7 +3613,7 @@ async function hacGuardarEnSupabase(periodo,registros,comentarios){
 // ──────────────── CONSULTAR HISTÓRICO ────────────────
 async function renderHacConsultar(){
   const el=document.getElementById('hac-content');
-  const{data:historicoTodo}=await sb.from('hacienda_historico').select('periodo,campo');
+  const{data:historicoTodo}=await sb.from('hacienda_historico').select('periodo,campo').range(0,19999);
   const periodos=[...new Set((historicoTodo||[]).map(p=>p.periodo))].sort().reverse();
   const campos=[...new Set((historicoTodo||[]).map(c=>c.campo))].sort();
 
@@ -3669,7 +3669,7 @@ async function hacBuscar(){
 
   if(periodosSel.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">Elegí al menos un período.</div></div>';return;}
 
-  let query=sb.from('hacienda_historico').select('*').in('periodo',periodosSel);
+  let query=sb.from('hacienda_historico').select('*').in('periodo',periodosSel).range(0,19999);
   if(camposSel.length>0)query=query.in('campo',camposSel);
   const{data:regsCrudos,error}=await query;
   if(error){resEl.innerHTML=`<div class="card"><div style="color:var(--danger);padding:1rem">Error: ${error.message}</div></div>`;return;}
@@ -3681,7 +3681,7 @@ async function hacBuscar(){
   if(regs.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay datos para esa combinación de filtros.</div></div>';return;}
 
   // Traer comentarios de esos períodos/campos
-  let queryCom=sb.from('hacienda_comentarios').select('*').in('periodo',periodosSel);
+  let queryCom=sb.from('hacienda_comentarios').select('*').in('periodo',periodosSel).range(0,19999);
   if(camposSel.length>0)queryCom=queryCom.in('campo',camposSel);
   const{data:comentarios}=await queryCom;
 

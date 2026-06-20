@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 <script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{--bg:#F5F3EE;--surface:#FFFFFF;--border:#E2DDD6;--text:#1A1916;--muted:#7A7570;--accent:#2D5A3D;--danger:#C0392B;--warning:#D4890A;--success:#2D5A3D;--info:#1A4A6B;--font-disp:'DM Serif Display',serif;--font-body:'DM Sans',sans-serif;--radius:10px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 12px rgba(0,0,0,0.04)}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -166,7 +167,7 @@ const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
 let currentUser=null,currentProfile=null,currentTab='resumen';
 let allCampos=[],allUnidades=[],allIndicadores=[],misCampos=[];
 let selectedCampo=null,selectedCat=null;
-const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo'};
+const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo',hacienda:'Hacienda'};
 const CAT_LABELS={gestion:'Gestión',financiero:'Financiero',comercial:'Comercial',productivo_global:'Productivo · Global',productivo_cria:'Productivo · Cría',productivo_recria:'Productivo · Recría',productivo_feedlot:'Productivo · Feedlot',alimenticio:'Alimenticio',sanitario:'Sanitario',mejoramiento_genetico:'Mejoramiento genético',ecologia:'Ecología',rrhh:'RRHH',inmuebles_urbanos:'Inmuebles Urbanos'};
 const CAT_ICONS={gestion:'📋',financiero:'📊',comercial:'📈',productivo_global:'🐄',productivo_cria:'🐮',productivo_recria:'🐂',productivo_feedlot:'🌽',alimenticio:'🌾',sanitario:'💉',mejoramiento_genetico:'🧬',ecologia:'🌿',rrhh:'👥',inmuebles_urbanos:'🏢'};
 
@@ -242,10 +243,11 @@ async function initApp(user){
   document.getElementById('topbar-role').textContent=ROL_LABELS[currentProfile.rol]||currentProfile.rol;
   buildNav();
   await mostrarAlertas();
-  renderTab('resumen');
+  renderTab(currentProfile.rol==='hacienda'?'hacienda':'resumen');
 }
 
 async function mostrarAlertas(){
+  if(currentProfile.rol==='hacienda'){document.getElementById('alerta-banner').innerHTML='';return;}
   const hoy=new Date();
   const anio=hoy.getFullYear();
   const mes=hoy.getMonth()+1; // 1-based
@@ -365,6 +367,7 @@ const TAB_DEFS=[
   {id:'rrhh',label:'RRHH',roles:['programador','directorio','coo','operativo','encargado_campo']},
   {id:'puestos',label:'Puestos',roles:['programador','directorio','coo']},
   {id:'historico',label:'Históricos',roles:['programador','directorio','coo','operativo']},
+  {id:'hacienda',label:'Planillas de hacienda',roles:['programador','directorio','coo','operativo','hacienda']},
   {id:'admin',label:'Administración',roles:['programador','coo']},
 ];
 
@@ -394,6 +397,7 @@ function renderTab(tab){
   if(tab==='rrhh')renderRRHH();
   if(tab==='puestos')renderPuestos();
   if(tab==='historico')renderHistorico();
+  if(tab==='hacienda')renderHacienda();
   if(tab==='admin')renderAdmin();
 }
 
@@ -3297,6 +3301,466 @@ function renderAdminPuestosTable(puestos){
         <td style="color:var(--muted);max-width:280px;white-space:normal;font-size:.8rem">${p.estado_2025||'—'}</td>
       </tr>`).join('')}</tbody>
     </table></div></div>`;
+}
+
+// ════════════════ PLANILLAS DE HACIENDA ════════════════
+const HAC_CATEGORIAS=[
+  {key:'c_cria',label:'C/cria',grupo:'Vaca'},
+  {key:'vacia',label:'Vacia',grupo:'Vaca'},
+  {key:'cut',label:'CUT',grupo:'Vaca'},
+  {key:'invernada_vaca',label:'Invernada',grupo:'Vaca'},
+  {key:'serv_15_18',label:'1º Serv 15/18 Meses',grupo:'Vaquillona'},
+  {key:'vaquillona',label:'Vaquillona',grupo:'Vaquillona'},
+  {key:'invernada_novillo',label:'Invernada',grupo:'Novillos'},
+  {key:'novillo_1a',label:'1 año',grupo:'Novillos'},
+  {key:'novillo_2a',label:'2 años',grupo:'Novillos'},
+  {key:'mej',label:'MEJ',grupo:'Novillos'},
+  {key:'machos',label:'Machos',grupo:'Terneros'},
+  {key:'hembras',label:'Hembras',grupo:'Terneros'},
+  {key:'orejanos',label:'Orejanos',grupo:'Terneros'},
+  {key:'recria_1a',label:'Recria 1 A',grupo:'Terneros'},
+  {key:'recria_2a',label:'Recria 2 A',grupo:'Terneros'},
+  {key:'scio_padres',label:'Scio/ Padres',grupo:'Toros'},
+  {key:'descarte',label:'Descarte',grupo:'Toros'},
+];
+const HAC_CAMPOS_ACTIVOS=['Rincon del Chañar','Pto. Flores','San Juan','Tandil'];
+let hacCampoActual=null; // datos crudos parseados del excel antes de confirmar
+
+async function renderHacienda(){
+  const main=document.getElementById('main-content');
+  main.innerHTML=`
+    <div class="section-heading">Planillas de hacienda</div>
+    <div class="section-sub">Carga mensual y consulta histórica de existencia ganadera</div>
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="hacSwitchTab('cargar',this)">↑ Cargar planilla</button>
+      <button class="tab-btn" onclick="hacSwitchTab('consultar',this)">🔍 Consultar histórico</button>
+    </div>
+    <div id="hac-content"></div>
+
+    <div id="modal-confirm-hac" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;padding:1rem">
+      <div style="background:var(--surface);border-radius:var(--radius);padding:1.5rem;width:100%;max-width:380px">
+        <div style="font-size:1rem;font-weight:500;color:var(--text);margin-bottom:.5rem">Confirmar carga</div>
+        <div style="font-size:.85rem;color:var(--muted);margin-bottom:1.25rem" id="confirm-hac-msg"></div>
+        <div style="display:flex;gap:.75rem">
+          <button class="btn btn-accent" id="confirm-hac-btn">Confirmar</button>
+          <button class="btn" onclick="document.getElementById('modal-confirm-hac').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+  hacSwitchTab('cargar');
+}
+
+function hacSwitchTab(tab,btn){
+  if(btn){
+    document.querySelectorAll('.tab-row .tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  if(tab==='cargar')renderHacCargar();
+  if(tab==='consultar')renderHacConsultar();
+}
+
+// ──────────────── CARGAR PLANILLA ────────────────
+function renderHacCargar(){
+  const el=document.getElementById('hac-content');
+  el.innerHTML=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Subir planilla mensual</div>
+      <div class="form-hint" style="margin-bottom:.75rem">Subí el archivo Excel completo tal cual lo recibís de cada campo (Consolidado_de_hacienda.xlsx). El sistema lee automáticamente la hoja "Consolidado" y te muestra una vista previa para revisar antes de guardar.</div>
+      <div class="upload-zone" onclick="document.getElementById('hac-file-input').click()">↑ Hacer clic para elegir el archivo Excel
+        <input type="file" id="hac-file-input" accept=".xlsx,.xls" style="display:none" onchange="hacProcesarArchivo(this)"/>
+      </div>
+      <div id="hac-file-status" class="form-hint" style="margin-top:.5rem"></div>
+    </div>
+    <div id="hac-preview"></div>`;
+}
+
+async function hacProcesarArchivo(input){
+  const file=input.files[0];
+  if(!file)return;
+  const statusEl=document.getElementById('hac-file-status');
+  statusEl.textContent='Leyendo archivo...';
+  statusEl.style.color='var(--muted)';
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const consolidadoSheetName=wb.SheetNames.find(n=>n.toLowerCase().startsWith('consolidado'));
+    if(!consolidadoSheetName){
+      statusEl.textContent='⚠ No se encontró una hoja "Consolidado" en este archivo. Revisá que sea el archivo correcto.';
+      statusEl.style.color='var(--danger)';
+      return;
+    }
+    const ws=wb.Sheets[consolidadoSheetName];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+    const parsed=hacParsearConsolidado(rows);
+    if(parsed.filas.length===0){
+      statusEl.textContent='⚠ No se pudieron detectar filas de campo/rodeo en la hoja Consolidado. Revisá el archivo o avisá a Claude para ajustar el lector.';
+      statusEl.style.color='var(--danger)';
+      return;
+    }
+    statusEl.textContent=`✓ Archivo leído correctamente · hoja "${consolidadoSheetName}" · ${parsed.filas.length} filas detectadas`;
+    statusEl.style.color='var(--success)';
+    hacCampoActual={archivo:file.name,sheetName:consolidadoSheetName,filas:parsed.filas};
+    await hacMostrarPreview();
+  }catch(err){
+    statusEl.textContent='⚠ Error al leer el archivo: '+err.message;
+    statusEl.style.color='var(--danger)';
+  }
+}
+
+// Parsea la hoja Consolidado del esquema estable (campo | rodeo | 17 categorías | total)
+function hacParsearConsolidado(rows){
+  const filas=[];
+  for(const row of rows){
+    if(!row||!row[0])continue;
+    const campoRaw=String(row[0]).trim();
+    const rodeoRaw=row[1]?String(row[1]).trim():null;
+    if(rodeoRaw!=='General'&&rodeoRaw!=='Plantel')continue; // saltea totales y filas de texto
+    let campoNorm=campoRaw.replace(/\s+/g,' ').trim();
+    if(/^rincon\s*ch/i.test(campoNorm))campoNorm='Rincon del Chañar';
+    if(/^san\s*juan/i.test(campoNorm))campoNorm='San Juan';
+    if(/^tandil/i.test(campoNorm))campoNorm='Tandil';
+    if(/^pto\.?\s*flores/i.test(campoNorm))campoNorm='Pto. Flores';
+    if(/^aguara/i.test(campoNorm))campoNorm='Aguara';
+    const valores=row.slice(2,19).map(v=>Number(v)||0); // 17 columnas de categorías
+    while(valores.length<17)valores.push(0);
+    filas.push({campo:campoNorm,rodeo:rodeoRaw,valores});
+  }
+  return{filas};
+}
+
+async function hacMostrarPreview(){
+  const previewEl=document.getElementById('hac-preview');
+  if(!hacCampoActual){previewEl.innerHTML='';return;}
+  previewEl.innerHTML='<div class="loading">Preparando vista previa...</div>';
+
+  // Traer histórico para calcular el total del período anterior, por campo+rodeo
+  const{data:historicoTodo}=await sb.from('hacienda_historico')
+    .select('periodo,campo,rodeo,cantidad');
+  const totalesPorClave={};
+  (historicoTodo||[]).forEach(r=>{
+    const clave=r.campo+'|'+r.rodeo;
+    if(!totalesPorClave[clave])totalesPorClave[clave]={};
+    if(!totalesPorClave[clave][r.periodo])totalesPorClave[clave][r.periodo]=0;
+    totalesPorClave[clave][r.periodo]+=r.cantidad;
+  });
+  const totalAnteriorPorClave={};
+  Object.entries(totalesPorClave).forEach(([clave,porPeriodo])=>{
+    const periodos=Object.keys(porPeriodo).sort();
+    if(periodos.length>0)totalAnteriorPorClave[clave]=porPeriodo[periodos[periodos.length-1]];
+  });
+
+  const hoy=new Date();
+  const periodoDefault=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+
+  let filasHtml='';
+  hacCampoActual.filas.forEach((fila,idx)=>{
+    const clave=fila.campo+'|'+fila.rodeo;
+    const totalNuevo=fila.valores.reduce((a,b)=>a+b,0);
+    const totalAnterior=totalAnteriorPorClave[clave];
+    let variacionHtml='<span style="color:var(--muted);font-size:.75rem">— sin dato previo</span>';
+    if(totalAnterior!==undefined&&totalAnterior>0){
+      const diff=totalNuevo-totalAnterior;
+      const pct=(diff/totalAnterior*100);
+      const subio=diff>0,igual=diff===0;
+      const alerta=Math.abs(pct)>=30;
+      const color=igual?'var(--muted)':(subio?'var(--success)':'var(--danger)');
+      const flecha=igual?'─':(subio?'↑':'↓');
+      variacionHtml=`<span style="color:${alerta?'var(--danger)':color};font-size:.75rem;font-weight:${alerta?600:400}">${flecha} ${Math.abs(pct).toFixed(1)}%</span>`;
+    }
+    filasHtml+=`<tr data-fila-idx="${idx}">
+      <td><strong>${fila.campo}</strong> · ${fila.rodeo}</td>
+      ${fila.valores.map((v,catIdx)=>`<td><input type="number" class="hac-input-cat" data-fila="${idx}" data-cat="${catIdx}" value="${v}" style="width:62px;padding:3px 5px;font-size:.78rem;text-align:right;border:1px solid var(--border);border-radius:6px"/></td>`).join('')}
+      <td style="text-align:right"><strong id="hac-total-${idx}">${totalNuevo.toLocaleString('es-AR')}</strong><br/>${variacionHtml}</td>
+    </tr>`;
+  });
+
+  const alertas=hacCampoActual.filas.map(fila=>{
+    const clave=fila.campo+'|'+fila.rodeo;
+    const totalNuevo=fila.valores.reduce((a,b)=>a+b,0);
+    const totalAnterior=totalAnteriorPorClave[clave];
+    if(totalAnterior!==undefined&&totalAnterior>0){
+      const pct=((totalNuevo-totalAnterior)/totalAnterior*100);
+      if(Math.abs(pct)>=30)return`${fila.campo} · ${fila.rodeo} ${pct>0?'subió':'bajó'} ${Math.abs(pct).toFixed(0)}% respecto al mes anterior (${totalAnterior.toLocaleString('es-AR')} → ${totalNuevo.toLocaleString('es-AR')})`;
+    }
+    return null;
+  }).filter(Boolean);
+
+  const camposPresentes=[...new Set(hacCampoActual.filas.map(f=>f.campo))];
+
+  previewEl.innerHTML=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Verificar datos antes de guardar</div>
+      <div class="form-row" style="margin-bottom:1rem">
+        <div class="form-group"><label class="form-label">Período de esta carga</label>
+          <input type="month" class="form-input" id="hac-periodo" value="${periodoDefault}" style="width:auto"/>
+        </div>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table style="font-size:.78rem">
+          <thead><tr>
+            <th>Campo / rodeo</th>
+            ${HAC_CATEGORIAS.map(c=>`<th style="text-align:right;white-space:nowrap">${c.label}</th>`).join('')}
+            <th style="text-align:right">Total vs. mes ant.</th>
+          </tr></thead>
+          <tbody>${filasHtml}</tbody>
+        </table>
+      </div>
+      ${alertas.length>0?`<div class="alert alert-warning" style="margin-top:1rem">⚠ <strong>Revisá estos valores antes de confirmar:</strong><ul style="margin:.4rem 0 0 1.2rem">${alertas.map(a=>`<li>${a}</li>`).join('')}</ul></div>`:''}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Comentarios por campo</div>
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        ${camposPresentes.map(campo=>`
+          <div style="background:var(--bg);border-radius:var(--radius);padding:.9rem">
+            <div style="font-weight:500;font-size:.85rem;margin-bottom:.5rem">${campo}</div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">💀 Mortandad · cantidad y motivo</label>
+                <textarea class="form-input hac-comentario-mortandad" data-campo="${campo}" rows="2" placeholder="Ej: 4 terneros, complicaciones de parto"></textarea>
+              </div>
+              <div class="form-group"><label class="form-label">🥩 Consumo · cantidad y motivo</label>
+                <textarea class="form-input hac-comentario-consumo" data-campo="${campo}" rows="2" placeholder="Ej: 2 novillos, consumo del personal del campo"></textarea>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:.6rem">
+      <span id="hac-confirmar-status" style="font-size:.8rem"></span>
+      <button class="btn" onclick="renderHacCargar()">← Volver a subir archivo</button>
+      <button class="btn btn-accent" onclick="hacConfirmarCarga()">✓ Confirmar y guardar</button>
+    </div>`;
+
+  // recalcular total en vivo si edita un input
+  document.querySelectorAll('.hac-input-cat').forEach(inp=>{
+    inp.addEventListener('input',()=>{
+      const filaIdx=inp.dataset.fila;
+      const inputsFila=document.querySelectorAll(`.hac-input-cat[data-fila="${filaIdx}"]`);
+      let total=0;
+      inputsFila.forEach(i=>total+=Number(i.value)||0);
+      document.getElementById(`hac-total-${filaIdx}`).textContent=total.toLocaleString('es-AR');
+    });
+  });
+}
+
+async function hacConfirmarCarga(){
+  const periodo=document.getElementById('hac-periodo').value; // formato YYYY-MM
+  const statusEl=document.getElementById('hac-confirmar-status');
+  if(!periodo){if(statusEl){statusEl.textContent='Elegí el período de esta carga.';statusEl.style.color='var(--danger)';}return;}
+
+  const registros=[];
+  hacCampoActual.filas.forEach((fila,idx)=>{
+    const inputsFila=document.querySelectorAll(`.hac-input-cat[data-fila="${idx}"]`);
+    inputsFila.forEach(inp=>{
+      const catIdx=Number(inp.dataset.cat);
+      const cat=HAC_CATEGORIAS[catIdx];
+      registros.push({
+        periodo,campo:fila.campo,rodeo:fila.rodeo,
+        grupo:cat.grupo,categoria:cat.label,
+        cantidad:Number(inp.value)||0
+      });
+    });
+  });
+
+  const comentarios=[];
+  document.querySelectorAll('.hac-comentario-mortandad').forEach(ta=>{
+    if(ta.value.trim())comentarios.push({periodo,campo:ta.dataset.campo,tipo:'mortandad',comentario:ta.value.trim()});
+  });
+  document.querySelectorAll('.hac-comentario-consumo').forEach(ta=>{
+    if(ta.value.trim())comentarios.push({periodo,campo:ta.dataset.campo,tipo:'consumo',comentario:ta.value.trim()});
+  });
+
+  document.getElementById('confirm-hac-msg').textContent=`¿Confirmás la carga de ${hacFormatPeriodo(periodo)}? Se van a guardar ${registros.length} registros de existencia${comentarios.length>0?` y ${comentarios.length} comentario(s)`:''}.`;
+  document.getElementById('confirm-hac-btn').onclick=async()=>{
+    document.getElementById('modal-confirm-hac').style.display='none';
+    await hacGuardarEnSupabase(periodo,registros,comentarios);
+  };
+  document.getElementById('modal-confirm-hac').style.display='flex';
+}
+
+async function hacGuardarEnSupabase(periodo,registros,comentarios){
+  const previewEl=document.getElementById('hac-preview');
+  previewEl.insertAdjacentHTML('beforeend','<div class="loading" id="hac-guardando">Guardando...</div>');
+
+  // Borrar carga previa del mismo período (por si se está corrigiendo una carga anterior) y volver a insertar
+  await sb.from('hacienda_historico').delete().eq('periodo',periodo);
+  await sb.from('hacienda_comentarios').delete().eq('periodo',periodo);
+
+  const{error:errHist}=await sb.from('hacienda_historico').insert(registros);
+  if(errHist){
+    document.getElementById('hac-guardando').outerHTML=`<div class="alert alert-danger">Error al guardar existencia: ${errHist.message}</div>`;
+    return;
+  }
+
+  if(comentarios.length>0){
+    const{error:errCom}=await sb.from('hacienda_comentarios').insert(comentarios);
+    if(errCom){
+      document.getElementById('hac-guardando').outerHTML=`<div class="alert alert-warning">Existencia guardada, pero hubo un error con los comentarios: ${errCom.message}</div>`;
+      return;
+    }
+  }
+
+  hacCampoActual=null;
+  document.getElementById('hac-content').innerHTML=`<div class="card"><div style="text-align:center;padding:2rem">
+    <div style="font-size:2rem;margin-bottom:.5rem">✓</div>
+    <div style="font-weight:500;margin-bottom:.5rem">Planilla de ${hacFormatPeriodo(periodo)} guardada correctamente</div>
+    <button class="btn btn-accent" onclick="hacSwitchTab('cargar')">Cargar otra planilla</button>
+    <button class="btn" onclick="hacSwitchTab('consultar')" style="margin-left:.5rem">Ver histórico →</button>
+  </div></div>`;
+}
+
+// ──────────────── CONSULTAR HISTÓRICO ────────────────
+async function renderHacConsultar(){
+  const el=document.getElementById('hac-content');
+  const{data:historicoTodo}=await sb.from('hacienda_historico').select('periodo,campo');
+  const periodos=[...new Set((historicoTodo||[]).map(p=>p.periodo))].sort().reverse();
+  const campos=[...new Set((historicoTodo||[]).map(c=>c.campo))].sort();
+
+  el.innerHTML=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Filtros</div>
+      <div class="form-group">
+        <label class="form-label">Campos (dejá todo sin marcar para incluir todos)</label>
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;margin-top:.25rem">
+          ${campos.map(c=>`<label style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;cursor:pointer">
+            <input type="checkbox" class="hac-filtro-campo" value="${c}"/> ${c}
+          </label>`).join('')}
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Categorías (dejá todo sin marcar para incluir todas)</label>
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;margin-top:.25rem">
+          ${HAC_CATEGORIAS.map(c=>`<label style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;cursor:pointer">
+            <input type="checkbox" class="hac-filtro-cat" value="${c.grupo}|${c.label}"/> ${c.grupo} · ${c.label}
+          </label>`).join('')}
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Períodos a comparar (seleccioná uno o varios meses)</label>
+        <select multiple id="hac-filtro-periodos" class="form-select" style="height:140px">
+          ${periodos.map(p=>`<option value="${p}">${hacFormatPeriodo(p)}</option>`).join('')}
+        </select>
+        <div class="form-hint">Mantené Ctrl (o Cmd en Mac) apretado para elegir varios meses de distintos años.</div>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:.5rem">
+        <input type="checkbox" id="hac-modo-suma"/>
+        <label for="hac-modo-suma" style="font-size:.82rem;cursor:pointer">Sumar los períodos seleccionados en un solo total (en vez de mostrarlos separados)</label>
+      </div>
+      <button class="btn btn-accent" onclick="hacBuscar()">Buscar</button>
+    </div>
+    <div id="hac-result"></div>`;
+}
+
+function hacFormatPeriodo(p){
+  const[y,m]=p.split('-');
+  const meses=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return`${meses[Number(m)-1]} ${y}`;
+}
+
+async function hacBuscar(){
+  const resEl=document.getElementById('hac-result');
+  resEl.innerHTML='<div class="loading">Buscando...</div>';
+
+  const camposSel=[...document.querySelectorAll('.hac-filtro-campo:checked')].map(c=>c.value);
+  const catsSel=[...document.querySelectorAll('.hac-filtro-cat:checked')].map(c=>c.value); // formato "Grupo|Categoria"
+  const periodosSel=[...document.getElementById('hac-filtro-periodos').selectedOptions].map(o=>o.value);
+  const modoSuma=document.getElementById('hac-modo-suma').checked;
+
+  if(periodosSel.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">Elegí al menos un período.</div></div>';return;}
+
+  let query=sb.from('hacienda_historico').select('*').in('periodo',periodosSel);
+  if(camposSel.length>0)query=query.in('campo',camposSel);
+  const{data:regsCrudos,error}=await query;
+  if(error){resEl.innerHTML=`<div class="card"><div style="color:var(--danger);padding:1rem">Error: ${error.message}</div></div>`;return;}
+
+  // Filtrar por categoría usando clave compuesta grupo+categoria (evita confundir categorías con el mismo nombre en distinto grupo, ej. "Invernada" de Vaca vs de Novillos)
+  const catsSelSet=new Set(catsSel);
+  const regs=(regsCrudos||[]).filter(r=>catsSel.length===0||catsSelSet.has(r.grupo+'|'+r.categoria));
+
+  if(regs.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay datos para esa combinación de filtros.</div></div>';return;}
+
+  // Traer comentarios de esos períodos/campos
+  let queryCom=sb.from('hacienda_comentarios').select('*').in('periodo',periodosSel);
+  if(camposSel.length>0)queryCom=queryCom.in('campo',camposSel);
+  const{data:comentarios}=await queryCom;
+
+  if(modoSuma){
+    hacRenderSuma(regs,comentarios||[],periodosSel);
+  }else{
+    hacRenderComparativa(regs,comentarios||[],periodosSel);
+  }
+}
+
+function hacRenderSuma(regs,comentarios,periodosSel){
+  const resEl=document.getElementById('hac-result');
+  const totalPorCampo={};
+  const totalPorCategoria={};
+  let totalGeneral=0;
+  regs.forEach(r=>{
+    const claveCat=r.grupo+' · '+r.categoria;
+    totalPorCampo[r.campo]=(totalPorCampo[r.campo]||0)+r.cantidad;
+    totalPorCategoria[claveCat]=(totalPorCategoria[claveCat]||0)+r.cantidad;
+    totalGeneral+=r.cantidad;
+  });
+
+  resEl.innerHTML=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Suma de ${periodosSel.length} período(s): ${periodosSel.map(hacFormatPeriodo).join(', ')}</div>
+      <div class="metrics-grid" style="margin-bottom:1rem">
+        <div class="metric-card"><div class="metric-label">Total cabezas (suma)</div><div class="metric-value">${totalGeneral.toLocaleString('es-AR')}</div></div>
+      </div>
+      <div class="table-wrap" style="margin-bottom:1rem">
+        <table><thead><tr><th>Campo</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>${Object.entries(totalPorCampo).map(([c,v])=>`<tr><td>${c}</td><td style="text-align:right"><strong>${v.toLocaleString('es-AR')}</strong></td></tr>`).join('')}</tbody></table>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Categoría</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>${Object.entries(totalPorCategoria).map(([c,v])=>`<tr><td>${c}</td><td style="text-align:right"><strong>${v.toLocaleString('es-AR')}</strong></td></tr>`).join('')}</tbody></table>
+      </div>
+    </div>
+    ${hacComentariosHtml(comentarios)}`;
+}
+
+function hacRenderComparativa(regs,comentarios,periodosSel){
+  const resEl=document.getElementById('hac-result');
+  const periodosOrdenados=[...periodosSel].sort();
+  const totalPorPeriodoCampo={};
+  periodosOrdenados.forEach(p=>totalPorPeriodoCampo[p]={});
+  regs.forEach(r=>{
+    if(!totalPorPeriodoCampo[r.periodo][r.campo])totalPorPeriodoCampo[r.periodo][r.campo]=0;
+    totalPorPeriodoCampo[r.periodo][r.campo]+=r.cantidad;
+  });
+  const camposPresentes=[...new Set(regs.map(r=>r.campo))].sort();
+
+  let tablaHtml=`<table><thead><tr><th>Campo</th>${periodosOrdenados.map(p=>`<th style="text-align:right">${hacFormatPeriodo(p)}</th>`).join('')}</tr></thead><tbody>`;
+  camposPresentes.forEach(campo=>{
+    tablaHtml+=`<tr><td><strong>${campo}</strong></td>${periodosOrdenados.map(p=>`<td style="text-align:right">${(totalPorPeriodoCampo[p][campo]||0).toLocaleString('es-AR')}</td>`).join('')}</tr>`;
+  });
+  tablaHtml+=`<tr style="border-top:2px solid var(--border)"><td><strong>TOTAL</strong></td>${periodosOrdenados.map(p=>{
+    const t=Object.values(totalPorPeriodoCampo[p]).reduce((a,b)=>a+b,0);
+    return`<td style="text-align:right"><strong>${t.toLocaleString('es-AR')}</strong></td>`;
+  }).join('')}</tr>`;
+  tablaHtml+='</tbody></table>';
+
+  resEl.innerHTML=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Comparativa por período</div>
+      <div class="table-wrap">${tablaHtml}</div>
+    </div>
+    ${hacComentariosHtml(comentarios)}`;
+}
+
+function hacComentariosHtml(comentarios){
+  if(!comentarios||comentarios.length===0)return'';
+  const porTipo={mortandad:comentarios.filter(c=>c.tipo==='mortandad'),consumo:comentarios.filter(c=>c.tipo==='consumo')};
+  return`<div class="card">
+    <div class="card-title">Comentarios del período</div>
+    ${porTipo.mortandad.length>0?`<div style="margin-bottom:1rem"><div style="font-weight:500;font-size:.82rem;margin-bottom:.4rem">💀 Mortandad</div>
+      ${porTipo.mortandad.map(c=>`<div style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem"><strong>${c.campo}</strong> (${hacFormatPeriodo(c.periodo)}): ${c.comentario}</div>`).join('')}</div>`:''}
+    ${porTipo.consumo.length>0?`<div><div style="font-weight:500;font-size:.82rem;margin-bottom:.4rem">🥩 Consumo</div>
+      ${porTipo.consumo.map(c=>`<div style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem"><strong>${c.campo}</strong> (${hacFormatPeriodo(c.periodo)}): ${c.comentario}</div>`).join('')}</div>`:''}
+  </div>`;
 }
 
 document.getElementById('login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});

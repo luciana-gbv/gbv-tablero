@@ -178,6 +178,10 @@ function puedeVer(modulo){
   if(currentProfile?.rol==='programador')return true;
   return !!currentPermisos[modulo]?.puede_ver;
 }
+function normalizarTexto(s){
+  if(!s)return'';
+  return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
 const CAT_LABELS={gestion:'Gestión',financiero:'Financiero',comercial:'Comercial',productivo_global:'Productivo · Global',productivo_cria:'Productivo · Cría',productivo_recria:'Productivo · Recría',productivo_feedlot:'Productivo · Feedlot',alimenticio:'Alimenticio',sanitario:'Sanitario',mejoramiento_genetico:'Mejoramiento genético',ecologia:'Ecología',rrhh:'RRHH',inmuebles_urbanos:'Inmuebles Urbanos'};
 const CAT_ICONS={gestion:'📋',financiero:'📊',comercial:'📈',productivo_global:'🐄',productivo_cria:'🐮',productivo_recria:'🐂',productivo_feedlot:'🌽',alimenticio:'🌾',sanitario:'💉',mejoramiento_genetico:'🧬',ecologia:'🌿',rrhh:'👥',inmuebles_urbanos:'🏢'};
 
@@ -1628,7 +1632,29 @@ async function renderRRHH(){
   if(!esDirectivo){
     const{data:evalRel}=await sb.from('evaluadores_empleado')
       .select('empleado_id').eq('evaluador_user_id',currentUser.id).eq('activo',true);
-    const ids=(evalRel||[]).map(e=>e.empleado_id);
+    const idsFijos=(evalRel||[]).map(e=>e.empleado_id);
+
+    // Evaluador automático por rol de campo: si el usuario actual es el Encargado
+    // activo de algún campo (puesto_codigo de liderazgo + su propio nombre/apellido
+    // matchea con su perfil), evalúa automáticamente a todo el personal de campo
+    // (Capataz, Peón, Puestero, Tractorista) de ESE campo específico, sin que haga
+    // falta una fila fija en evaluadores_empleado. Si el día de mañana cambia quién
+    // es el Encargado, esto se recalcula solo con cada carga de pantalla.
+    const PUESTOS_ENCARGADO=['A_norte','A_sur','A_mendoza'];
+    const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
+    const miEmpleadoComoEncargado=(todosEmpleados||[]).find(e=>
+      PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
+      normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
+      normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
+    );
+    let idsAutomaticos=[];
+    if(miEmpleadoComoEncargado){
+      idsAutomaticos=(todosEmpleados||[])
+        .filter(e=>PUESTOS_CAMPO_AUTOMATICOS.includes(e.puesto_codigo)&&e.area===miEmpleadoComoEncargado.area)
+        .map(e=>e.id);
+    }
+
+    const ids=[...new Set([...idsFijos,...idsAutomaticos])];
     misEmpleados=misEmpleados.filter(e=>ids.includes(e.id));
   }
 
@@ -1985,7 +2011,26 @@ async function abrirEvaluacion(empleadoId){
   if(!esProgramador){
     const{data:rel}=await sb.from('evaluadores_empleado')
       .select('id').eq('empleado_id',empleadoId).eq('evaluador_user_id',currentUser.id).eq('activo',true);
-    if(!rel||rel.length===0){
+    let tieneAcceso=!!(rel&&rel.length>0);
+
+    // Evaluador automático por rol de campo (ver renderRRHH para la explicación completa)
+    if(!tieneAcceso){
+      const PUESTOS_ENCARGADO=['A_norte','A_sur','A_mendoza'];
+      const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
+      if(PUESTOS_CAMPO_AUTOMATICOS.includes(emp.puesto_codigo)){
+        const todos=todosEmpleados||misEmpleados||[];
+        const miEmpleadoComoEncargado=todos.find(e=>
+          PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
+          normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
+          normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
+        );
+        if(miEmpleadoComoEncargado&&miEmpleadoComoEncargado.area===emp.area){
+          tieneAcceso=true;
+        }
+      }
+    }
+
+    if(!tieneAcceso){
       const panel=document.getElementById('rrhh-panel');
       panel.innerHTML=`
         <button class="btn btn-sm" onclick="renderRRHH()" style="margin-bottom:1rem">← Volver</button>

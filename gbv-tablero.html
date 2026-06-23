@@ -328,6 +328,36 @@ async function mostrarAlertas(){
     sinAprobar=(enviadas||[]).length;
   }
 
+  // Alerta de "preparar ronda": 1 semana ANTES de la ventana normal de evaluación,
+  // para que programador/coo asignen evaluador a quien le falte antes de que la
+  // alerta normal llegue a los evaluadores. Ventana normal: 25/may-7/jun y 25/nov-7/dic.
+  // Esta alerta: 18/may-24/may y 18/nov-24/nov (la semana previa).
+  const esSemanaPreparacion = (mes===5 && dia>=18 && dia<=24) || (mes===11 && dia>=18 && dia<=24);
+  let alertaPrepararRonda = null;
+  if(esSemanaPreparacion && ['programador','coo'].includes(currentProfile.rol)){
+    const PUESTOS_ENCARGADO_CAMPO_AL=['A_norte','A_sur','A_mendoza'];
+    const PUESTOS_CAMPO_AUTOMATICOS_AL=['capataz','peon','puestero','tractorista'];
+    const[{data:todosEmp},{data:fijosRel}]=await Promise.all([
+      sb.from('empleados').select('id,area,puesto_codigo').eq('activo',true),
+      sb.from('evaluadores_empleado').select('empleado_id').eq('activo',true)
+    ]);
+    const{data:asignadosPeriodo}=await sb.from('evaluadores_periodo').select('empleado_id').eq('periodo',periodoRRHH);
+    const idsFijos=new Set((fijosRel||[]).map(r=>r.empleado_id));
+    const idsAsignadosPeriodo=new Set((asignadosPeriodo||[]).map(r=>r.empleado_id));
+    const sinAsignarCount=(todosEmp||[]).filter(e=>{
+      if(idsFijos.has(e.id))return false;
+      if(idsAsignadosPeriodo.has(e.id))return false;
+      if(PUESTOS_CAMPO_AUTOMATICOS_AL.includes(e.puesto_codigo)){
+        const tieneEncargado=(todosEmp||[]).some(o=>PUESTOS_ENCARGADO_CAMPO_AL.includes(o.puesto_codigo)&&o.area===e.area);
+        if(tieneEncargado)return false;
+      }
+      return true;
+    }).length;
+    if(sinAsignarCount>0){
+      alertaPrepararRonda={sinAsignar:sinAsignarCount,label:periodoLabel};
+    }
+  }
+
   // ── Construir banner ──
   const alertaDiv=document.getElementById('alerta-banner');
   if(!alertaDiv) return;
@@ -369,6 +399,14 @@ async function mostrarAlertas(){
     html+=`<div class="alert alert-warning" style="margin:0 1.5rem;margin-top:.5rem">
       👥 <strong>${sinAprobar} evaluación${sinAprobar>1?'es':''} enviada${sinAprobar>1?'s':''}</strong> esperan aprobación del Directorio
       <button onclick="renderTab('rrhh')" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #7A5A00;background:transparent;color:#7A5A00;cursor:pointer;margin-left:.5rem">Aprobar →</button>
+    </div>`;
+  }
+
+  if(alertaPrepararRonda){
+    html+=`<div class="alert alert-warning" style="margin:0 1.5rem;margin-top:.5rem">
+      🗓️ <strong>Preparar ronda de evaluación · ${alertaPrepararRonda.label}</strong> — 
+      Quedan <strong>${alertaPrepararRonda.sinAsignar} empleado${alertaPrepararRonda.sinAsignar>1?'s':''} sin evaluador asignado</strong> para esta ronda, que empieza en pocos días
+      <button onclick="renderTab('rrhh');setTimeout(()=>document.querySelector('[onclick*=preparar-ronda]')?.click(),300)" style="font-size:.75rem;padding:3px 10px;border-radius:var(--radius);border:1px solid #7A5A00;background:transparent;color:#7A5A00;cursor:pointer;margin-left:.5rem">Preparar →</button>
     </div>`;
   }
 
@@ -1684,6 +1722,7 @@ async function renderRRHH(){
     <div class="tab-row">
       <button class="tab-btn active" onclick="rrhhTab('evaluar',this)">Evaluar empleados</button>
       ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>${puedeEditarRRHH?`<button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button><button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button><button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}`:''}
+      ${['programador','coo'].includes(currentProfile.rol)?`<button class="tab-btn" onclick="rrhhTab('preparar-ronda',this)">🗓️ Preparar ronda</button>`:''}
     </div>
     <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo)}</div>
 
@@ -1786,6 +1825,7 @@ function rrhhTab(tab,btn){
   if(tab==='aprobar') panel.innerHTML=renderRRHHAprobar(todosEmpleados,evalsPorEmpleado,periodo);
   if(tab==='personal') panel.innerHTML=renderRRHHPersonal(todosEmpleados);
   if(tab==='archivados-emp') renderRRHHArchivados(panel);
+  if(tab==='preparar-ronda') renderPrepararRonda(panel,todosEmpleados,periodo);
 }
 
 async function renderRRHHArchivados(panel){
@@ -1824,6 +1864,146 @@ function confirmarReactivarEmpleado(id, nombre){
     renderRRHH();
   };
   document.getElementById('modal-confirm-emp').style.display='flex';
+}
+// ──────────── PREPARAR RONDA DE EVALUACIÓN ────────────
+const PUESTOS_ENCARGADO_CAMPO=['A_norte','A_sur','A_mendoza'];
+const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
+
+// Dado un empleado y la lista completa, determina si tiene evaluador FIJO
+// (evaluadores_empleado), AUTOMÁTICO (por rol de campo), o NINGUNO.
+function resolverTipoEvaluador(emp, todosEmpleados, evaluadoresFijosMap){
+  const fijos=evaluadoresFijosMap[emp.id]||[];
+  if(fijos.length>0)return{tipo:'fijo',nombres:fijos.map(f=>f.nombre).join(' y ')};
+  if(PUESTOS_CAMPO_AUTOMATICOS.includes(emp.puesto_codigo)){
+    const encargado=todosEmpleados.find(e=>PUESTOS_ENCARGADO_CAMPO.includes(e.puesto_codigo)&&e.area===emp.area);
+    if(encargado)return{tipo:'automatico',nombres:`${encargado.nombre} ${encargado.apellido||''}`.trim()};
+  }
+  return{tipo:'ninguno',nombres:null};
+}
+
+async function renderPrepararRonda(panel,todosEmpleados,periodo){
+  panel.innerHTML='<div class="loading">Cargando...</div>';
+
+  const[{data:evaluadoresFijos},{data:profilesData},{data:asignacionesPeriodo},{data:participantes}]=await Promise.all([
+    sb.from('evaluadores_empleado').select('empleado_id,evaluador_user_id,profiles(nombre,apellido)').eq('activo',true),
+    sb.from('profiles').select('id,nombre,apellido').order('apellido'),
+    sb.from('evaluadores_periodo').select('*').eq('periodo',periodo.periodo),
+    sb.from('participantes_ronda').select('*').eq('periodo',periodo.periodo)
+  ]);
+
+  const evaluadoresFijosMap={};
+  (evaluadoresFijos||[]).forEach(r=>{
+    if(!evaluadoresFijosMap[r.empleado_id])evaluadoresFijosMap[r.empleado_id]=[];
+    evaluadoresFijosMap[r.empleado_id].push({id:r.evaluador_user_id,nombre:`${r.profiles?.nombre||''} ${r.profiles?.apellido||''}`.trim()});
+  });
+  const asignacionPeriodoMap={};
+  (asignacionesPeriodo||[]).forEach(a=>{asignacionPeriodoMap[a.empleado_id]=a.evaluador_user_id;});
+  const participaMap={};
+  (participantes||[]).forEach(p=>{participaMap[p.empleado_id]=p.participa;});
+
+  const filas=(todosEmpleados||[]).map(emp=>{
+    const resuelto=resolverTipoEvaluador(emp,todosEmpleados,evaluadoresFijosMap);
+    const asignacionManual=asignacionPeriodoMap[emp.id]||'';
+    const participa=participaMap[emp.id]!==undefined?participaMap[emp.id]:true; // default abierto
+    return{emp,resuelto,asignacionManual,participa};
+  });
+
+  const sinAsignar=filas.filter(f=>f.resuelto.tipo==='ninguno'&&!f.asignacionManual).length;
+
+  panel.innerHTML=`
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Preparar ronda — ${periodo.label}</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:1rem">
+        Asigná evaluador a quienes no tienen uno fijo o automático, y elegí quién entra a esta ronda.
+        Esto se define de nuevo cada período — no afecta rondas anteriores ni futuras.
+      </div>
+      <div style="display:flex;gap:.6rem;margin-bottom:1rem;flex-wrap:wrap">
+        <input type="text" class="form-input" id="prep-busqueda" placeholder="Buscar empleado..." style="flex:1;min-width:160px" oninput="prepFiltrar()"/>
+        <select class="form-select" id="prep-filtro-area" style="width:auto" onchange="prepFiltrar()">
+          <option value="">Todas las áreas</option>
+          ${[...new Set((todosEmpleados||[]).map(e=>e.area).filter(Boolean))].sort().map(a=>`<option value="${a}">${a}</option>`).join('')}
+        </select>
+        <select class="form-select" id="prep-filtro-sin-asignar" style="width:auto" onchange="prepFiltrar()">
+          <option value="">Todos</option>
+          <option value="sin">Sin evaluador asignado</option>
+        </select>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table style="font-size:.8rem" id="prep-tabla">
+          <thead><tr>
+            <th>Empleado</th><th>Puesto</th><th>Evaluador este período</th><th style="text-align:center">Entra a la ronda</th>
+          </tr></thead>
+          <tbody>
+            ${filas.map(f=>`
+              <tr data-area="${f.emp.area||''}" data-sin-asignar="${f.resuelto.tipo==='ninguno'&&!f.asignacionManual?'1':'0'}" data-nombre="${(f.emp.nombre+' '+(f.emp.apellido||'')).toLowerCase()}">
+                <td><strong>${f.emp.nombre} ${f.emp.apellido||''}</strong></td>
+                <td style="color:var(--muted)">${f.emp.puesto_descripcion||'—'}</td>
+                <td>${prepCeldaEvaluador(f)}</td>
+                <td style="text-align:center"><input type="checkbox" ${f.participa?'checked':''} onchange="prepGuardarParticipacion('${f.emp.id}','${periodo.periodo}',this.checked)"/></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;align-items:center;gap:.5rem;font-size:.75rem;color:var(--muted);margin-top:1rem">
+        <span style="color:#1A4A6B">↻ auto = por rol de campo</span>
+        <span style="color:#1A4A2A">✓ fijo = asignación permanente</span>
+        <span style="color:${sinAsignar>0?'#D4890A':'var(--muted)'}">${sinAsignar>0?`⚠ ${sinAsignar} sin asignar todavía`:'✓ todos tienen evaluador'}</span>
+      </div>
+    </div>`;
+  prepPoblarSelectsEvaluador(profilesData||[],asignacionPeriodoMap);
+}
+
+function prepCeldaEvaluador(f){
+  if(f.resuelto.tipo==='fijo')return`<span class="badge badge-ok">✓ ${f.resuelto.nombres} (fijo)</span>`;
+  if(f.resuelto.tipo==='automatico')return`<span class="badge badge-pend">↻ ${f.resuelto.nombres} (auto)</span>`;
+  return`<select class="form-select prep-select-evaluador" data-emp="${f.emp.id}" style="height:30px;font-size:.78rem;${!f.asignacionManual?'border-color:#D4890A;background:#FEF3CD':''}" onchange="prepGuardarAsignacion(this)">
+    <option value="">— Sin asignar —</option>
+  </select>`;
+}
+
+// Las opciones del select de evaluadores se completan después de renderizar
+// (para no repetir el HTML de <option> 91 veces innecesariamente en cada fila)
+function prepPoblarSelectsEvaluador(profilesData,asignacionPeriodoMap){
+  document.querySelectorAll('.prep-select-evaluador').forEach(sel=>{
+    const empId=sel.dataset.emp;
+    const actual=asignacionPeriodoMap[empId]||'';
+    profilesData.forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p.id;
+      opt.textContent=`${p.nombre} ${p.apellido||''}`.trim();
+      if(p.id===actual)opt.selected=true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+async function prepGuardarAsignacion(select){
+  const empId=select.dataset.emp;
+  const evaluadorId=select.value;
+  const periodo=window._rrhhData.periodo.periodo;
+  if(!evaluadorId){
+    await sb.from('evaluadores_periodo').delete().eq('empleado_id',empId).eq('periodo',periodo);
+  }else{
+    await sb.from('evaluadores_periodo').upsert({empleado_id:empId,evaluador_user_id:evaluadorId,periodo},{onConflict:'empleado_id,periodo'});
+  }
+  select.style.borderColor=evaluadorId?'':'var(--warning)';
+  select.style.background=evaluadorId?'':'var(--warning-bg)';
+}
+
+async function prepGuardarParticipacion(empId,periodo,participa){
+  await sb.from('participantes_ronda').upsert({empleado_id:empId,periodo,participa},{onConflict:'empleado_id,periodo'});
+}
+
+function prepFiltrar(){
+  const texto=document.getElementById('prep-busqueda').value.toLowerCase();
+  const area=document.getElementById('prep-filtro-area').value;
+  const soloSinAsignar=document.getElementById('prep-filtro-sin-asignar').value==='sin';
+  document.querySelectorAll('#prep-tabla tbody tr').forEach(tr=>{
+    const matchTexto=!texto||tr.dataset.nombre.includes(texto);
+    const matchArea=!area||tr.dataset.area===area;
+    const matchSinAsignar=!soloSinAsignar||tr.dataset.sinAsignar==='1';
+    tr.style.display=(matchTexto&&matchArea&&matchSinAsignar)?'':'none';
+  });
 }
 
 function renderRRHHPersonal(empleados){

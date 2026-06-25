@@ -335,10 +335,10 @@ async function mostrarAlertas(){
   const esSemanaPreparacion = (mes===5 && dia>=18 && dia<=24) || (mes===11 && dia>=18 && dia<=24);
   let alertaPrepararRonda = null;
   if(esSemanaPreparacion && ['programador','coo'].includes(currentProfile.rol)){
-    const PUESTOS_ENCARGADO_CAMPO_AL=['A_norte','A_sur','A_mendoza'];
+    const PUESTOS_ENCARGADO_CAMPO_AL=['encargado'];
     const PUESTOS_CAMPO_AUTOMATICOS_AL=['capataz','peon','puestero','tractorista'];
     const[{data:todosEmp},{data:fijosRel}]=await Promise.all([
-      sb.from('empleados').select('id,area,puesto_codigo').eq('activo',true),
+      sb.from('empleados').select('id,area,unidad_negocio,puesto_codigo').eq('activo',true),
       sb.from('evaluadores_empleado').select('empleado_id').eq('activo',true)
     ]);
     const{data:asignadosPeriodo}=await sb.from('evaluadores_periodo').select('empleado_id').eq('periodo',periodoRRHH);
@@ -348,7 +348,7 @@ async function mostrarAlertas(){
       if(idsFijos.has(e.id))return false;
       if(idsAsignadosPeriodo.has(e.id))return false;
       if(PUESTOS_CAMPO_AUTOMATICOS_AL.includes(e.puesto_codigo)){
-        const tieneEncargado=(todosEmp||[]).some(o=>PUESTOS_ENCARGADO_CAMPO_AL.includes(o.puesto_codigo)&&o.area===e.area);
+        const tieneEncargado=(todosEmp||[]).some(o=>PUESTOS_ENCARGADO_CAMPO_AL.includes(o.puesto_codigo)&&o.unidad_negocio===e.unidad_negocio);
         if(tieneEncargado)return false;
       }
       return true;
@@ -1513,7 +1513,7 @@ const CONDICIONES_LIDERAZGO=[
 ];
 
 // Puestos que son encargados/responsables (usan tabla de liderazgo)
-const PUESTOS_LIDERAZGO=['A_sur','A_norte','coo','9_coo'];
+const PUESTOS_LIDERAZGO=['encargado','coo','9_coo'];
 
 // Objetivos por puesto
 const OBJETIVOS_PUESTO={
@@ -1610,6 +1610,17 @@ const OBJETIVOS_PUESTO={
   ],
 };
 
+// El encargado usa la tabla de objetivos según su zona de evaluación:
+// Prov. Bs As -> A_sur, Norte -> A_norte, Mendoza -> A_mendoza (todavía sin tabla).
+// Cualquier otro puesto usa su propio código como clave.
+function claveObjetivos(emp){
+  if(emp.puesto_codigo==='encargado'){
+    const Z={'Prov. Bs As':'A_sur','Norte':'A_norte','Mendoza':'A_mendoza'};
+    return Z[emp.zona_evaluacion]||null;
+  }
+  return emp.puesto_codigo;
+}
+
 // Calcular porcentaje actitudinal según tabla
 function calcPorcentajeActitudinal(puntaje, esLider){
   if(esLider){
@@ -1678,7 +1689,7 @@ async function renderRRHH(){
     // (Capataz, Peón, Puestero, Tractorista) de ESE campo específico, sin que haga
     // falta una fila fija en evaluadores_empleado. Si el día de mañana cambia quién
     // es el Encargado, esto se recalcula solo con cada carga de pantalla.
-    const PUESTOS_ENCARGADO=['A_norte','A_sur','A_mendoza'];
+    const PUESTOS_ENCARGADO=['encargado'];
     const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
     const miEmpleadoComoEncargado=(todosEmpleados||[]).find(e=>
       PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
@@ -1688,7 +1699,7 @@ async function renderRRHH(){
     let idsAutomaticos=[];
     if(miEmpleadoComoEncargado){
       idsAutomaticos=(todosEmpleados||[])
-        .filter(e=>PUESTOS_CAMPO_AUTOMATICOS.includes(e.puesto_codigo)&&e.area===miEmpleadoComoEncargado.area)
+        .filter(e=>PUESTOS_CAMPO_AUTOMATICOS.includes(e.puesto_codigo)&&e.unidad_negocio===miEmpleadoComoEncargado.unidad_negocio)
         .map(e=>e.id);
     }
 
@@ -1748,8 +1759,7 @@ async function renderRRHH(){
             <option value="8">8 - Segundo Contador</option>
             <option value="9_coo">9 - Segundo del COO</option>
             <option value="coo">COO</option>
-            <option value="A_sur">Encargado - Buenos Aires</option>
-            <option value="A_norte">Encargado - Norte</option>
+            <option value="encargado">Encargado</option>
             <option value="B">Escribiente</option>
             <option value="C_sur">Capataz - Buenos Aires</option>
             <option value="C_norte">Capataz - Norte</option>
@@ -1866,7 +1876,7 @@ function confirmarReactivarEmpleado(id, nombre){
   document.getElementById('modal-confirm-emp').style.display='flex';
 }
 // ──────────── PREPARAR RONDA DE EVALUACIÓN ────────────
-const PUESTOS_ENCARGADO_CAMPO=['A_norte','A_sur','A_mendoza'];
+const PUESTOS_ENCARGADO_CAMPO=['encargado'];
 const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
 
 // Dado un empleado y la lista completa, determina si tiene evaluador FIJO
@@ -1875,7 +1885,7 @@ function resolverTipoEvaluador(emp, todosEmpleados, evaluadoresFijosMap){
   const fijos=evaluadoresFijosMap[emp.id]||[];
   if(fijos.length>0)return{tipo:'fijo',nombres:fijos.map(f=>f.nombre).join(' y ')};
   if(PUESTOS_CAMPO_AUTOMATICOS.includes(emp.puesto_codigo)){
-    const encargado=todosEmpleados.find(e=>PUESTOS_ENCARGADO_CAMPO.includes(e.puesto_codigo)&&e.area===emp.area);
+    const encargado=todosEmpleados.find(e=>PUESTOS_ENCARGADO_CAMPO.includes(e.puesto_codigo)&&e.unidad_negocio===emp.unidad_negocio);
     if(encargado)return{tipo:'automatico',nombres:`${encargado.nombre} ${encargado.apellido||''}`.trim()};
   }
   return{tipo:'ninguno',nombres:null};
@@ -2195,7 +2205,7 @@ async function abrirEvaluacion(empleadoId){
 
     // Evaluador automático por rol de campo (ver renderRRHH para la explicación completa)
     if(!tieneAcceso){
-      const PUESTOS_ENCARGADO=['A_norte','A_sur','A_mendoza'];
+      const PUESTOS_ENCARGADO=['encargado'];
       const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
       if(PUESTOS_CAMPO_AUTOMATICOS.includes(emp.puesto_codigo)){
         const todos=todosEmpleados||misEmpleados||[];
@@ -2204,7 +2214,7 @@ async function abrirEvaluacion(empleadoId){
           normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
           normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
         );
-        if(miEmpleadoComoEncargado&&miEmpleadoComoEncargado.area===emp.area){
+        if(miEmpleadoComoEncargado&&miEmpleadoComoEncargado.unidad_negocio===emp.unidad_negocio){
           tieneAcceso=true;
         }
       }
@@ -2223,7 +2233,8 @@ async function abrirEvaluacion(empleadoId){
   }
   const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
   const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
-  const objetivos=OBJETIVOS_PUESTO[emp.puesto_codigo]||[];
+  const claveObj=claveObjetivos(emp);
+  const objetivos=OBJETIVOS_PUESTO[claveObj]||[];
   const evalExistente=(evalsPorEmpleado[empleadoId]||[]).find(e=>e.evaluador_user_id===currentUser.id);
   const actPrev=evalExistente?.actitudinal||{};
   const objPrev=evalExistente?.objetivos||{};
@@ -2268,7 +2279,7 @@ async function abrirEvaluacion(empleadoId){
           <div style="padding:.75rem 0;border-bottom:0.5px solid var(--border)">
             <div style="font-size:.82rem;font-weight:500;color:var(--text);margin-bottom:.4rem">${obj.label}</div>
             <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-              ${obj.pts.map((p,j)=>`<button class="btn btn-sm ${objPrev['o'+i]===p?'btn-accent':''}" id="obj-${i}-${j}" onclick="setObjetivo(${i},${p},${j},'${emp.puesto_codigo}')" style="font-size:.72rem;padding:.3rem .6rem">
+              ${obj.pts.map((p,j)=>`<button class="btn btn-sm ${objPrev['o'+i]===p?'btn-accent':''}" id="obj-${i}-${j}" onclick="setObjetivo(${i},${p},${j},'${claveObj||''}')" style="font-size:.72rem;padding:.3rem .6rem">
                 ${p} pts<br><span style="font-size:.65rem;opacity:.8">${obj.rangos[j]||''}</span>
               </button>`).join('')}
             </div>
@@ -2297,7 +2308,7 @@ async function abrirEvaluacion(empleadoId){
     </div>`;
 
   // Inicializar estado de botones con valores previos
-  window._evalState={actitudinal:{...actPrev},objetivos:{...objPrev},esLider,puesto:emp.puesto_codigo};
+  window._evalState={actitudinal:{...actPrev},objetivos:{...objPrev},esLider,puesto:claveObj};
   Object.entries(actPrev).forEach(([k,v])=>{
     const i=parseInt(k.replace('c',''));
     [1,2,3,4,5].forEach(x=>{const b=document.getElementById(`act-${i}-${x}`);if(b)b.className=`btn btn-sm ${x===v?'btn-accent':''}`;});

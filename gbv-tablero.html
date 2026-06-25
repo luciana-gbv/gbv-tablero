@@ -1746,23 +1746,54 @@ async function renderRRHH(){
           <div class="form-group"><label class="form-label">Nombre *</label><input type="text" class="form-input" id="emp-nombre" placeholder="Nombre"/></div>
           <div class="form-group"><label class="form-label">Apellido</label><input type="text" class="form-input" id="emp-apellido" placeholder="Apellido"/></div>
         </div>
-        <div class="form-group"><label class="form-label">Área / Unidad de negocio</label><input type="text" class="form-input" id="emp-area" placeholder="Ej: Administración, Tandil, Corrientes..."/></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Unidad de Negocio</label>
+            <select class="form-select" id="emp-unidad" onchange="empActualizarZona()">
+              <option value="">— Elegí una unidad —</option>
+              <option value="Corrientes">Corrientes</option>
+              <option value="Oeste">Oeste</option>
+              <option value="Tandil">Tandil</option>
+              <option value="Mar del Plata">Mar del Plata</option>
+              <option value="Mendoza">Mendoza</option>
+              <option value="Administración">Administración</option>
+              <option value="Personal GQ">Personal GQ</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Zona de evaluación</label>
+            <input type="text" class="form-input" id="emp-zona" readonly placeholder="(se completa sola)" style="background:var(--bg);color:var(--muted)"/>
+          </div>
+        </div>
         <div class="form-group"><label class="form-label">Puesto</label>
           <select class="form-select" id="emp-puesto">
-            <option value="1">1 - Cobranzas, Ventas y Sueldos</option>
-            <option value="2">2 - Proveedores</option>
-            <option value="3">3 - Impuestos/Societario</option>
-            <option value="4">4 - Auxiliar Administración y Finanzas</option>
-            <option value="5">5 - Recepción y Secretaría</option>
-            <option value="6">6 - Asistente Comité Ejecutivo</option>
-            <option value="7">7 - Cabaña</option>
-            <option value="8">8 - Segundo Contador</option>
-            <option value="9_coo">9 - Segundo del COO</option>
-            <option value="coo">COO</option>
-            <option value="encargado">Encargado</option>
-            <option value="B">Escribiente</option>
-            <option value="C_sur">Capataz - Buenos Aires</option>
-            <option value="C_norte">Capataz - Norte</option>
+            <optgroup label="Campo">
+              <option value="peon">Peón general</option>
+              <option value="puestero">Puestero</option>
+              <option value="casero">Casero</option>
+              <option value="tractorista">Tractorista</option>
+              <option value="capataz">Capataz</option>
+              <option value="cocinera">Cocinera</option>
+              <option value="parquero">Parquero</option>
+              <option value="mixero_feedlot">Mixero / Feedlot</option>
+              <option value="chofer">Chofer</option>
+              <option value="servicio">Servicio</option>
+              <option value="cuidador">Cuidador</option>
+              <option value="cabanero">Cabañero</option>
+              <option value="cuadro_honor">Cuadro de honor</option>
+              <option value="encargado">Encargado</option>
+              <option value="escribiente">Escribiente</option>
+            </optgroup>
+            <optgroup label="Administración y otros">
+              <option value="1">Cobranzas, Ventas y Sueldos</option>
+              <option value="2">Proveedores</option>
+              <option value="3">Contaduría (libros / IVA / firma)</option>
+              <option value="4">Auxiliar de Administración y Finanzas</option>
+              <option value="5">Recepción y Secretaría</option>
+              <option value="6">Asistente de Comité Ejecutivo</option>
+              <option value="7">Cabaña / Hacienda (registros, DEPs)</option>
+              <option value="8">Segundo Contador</option>
+              <option value="9_coo">Segundo del COO</option>
+              <option value="coo">COO</option>
+            </optgroup>
           </select>
         </div>
         <div class="form-group"><label class="form-label">Descripción del puesto</label><input type="text" class="form-input" id="emp-puesto-desc" placeholder="Ej: Contadora, Chofer, Puestero..."/></div>
@@ -2028,7 +2059,7 @@ function renderRRHHPersonal(empleados){
         <td style="color:var(--muted)">${e.fecha_ingreso?new Date(e.fecha_ingreso).toLocaleDateString('es-AR'):'—'}</td>
         <td>
           <div style="display:flex;gap:.4rem">
-            <button class="btn btn-sm" onclick="editarEmpleado('${e.id}','${(e.nombre||'').replace(/'/g,"\\'")}','${(e.apellido||'').replace(/'/g,"\\'")}','${e.area||''}','${e.puesto_codigo||''}','${(e.puesto_descripcion||'').replace(/'/g,"\\'")}','${e.fecha_ingreso||''}')">✏️</button>
+            <button class="btn btn-sm" onclick="editarEmpleado('${e.id}','${(e.nombre||'').replace(/'/g,"\\'")}','${(e.apellido||'').replace(/'/g,"\\'")}','${e.unidad_negocio||''}','${e.puesto_codigo||''}','${(e.puesto_descripcion||'').replace(/'/g,"\\'")}','${e.fecha_ingreso||''}')">✏️</button>
             <button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="confirmarBajaEmpleado('${e.id}','${(e.nombre||'')} ${(e.apellido||'')}')">Dar de baja</button>
           </div>
         </td>
@@ -2038,28 +2069,39 @@ function renderRRHHPersonal(empleados){
 }
 
 // ── CRUD PERSONAL ──
+// Completa sola la zona de evaluación según la unidad elegida
+function empActualizarZona(){
+  const ZONA_POR_UNIDAD={'Corrientes':'Norte','Oeste':'Prov. Bs As','Tandil':'Prov. Bs As','Mar del Plata':'Prov. Bs As','Mendoza':'Mendoza'};
+  const u=document.getElementById('emp-unidad').value;
+  const el=document.getElementById('emp-zona');
+  if(!u){el.value='';return;}
+  el.value=ZONA_POR_UNIDAD[u]||'(no aplica)';
+}
+
 function abrirModalEmpleado(){
   document.getElementById('modal-emp-titulo').textContent='Agregar empleado';
   document.getElementById('emp-edit-id').value='';
   document.getElementById('emp-nombre').value='';
   document.getElementById('emp-apellido').value='';
-  document.getElementById('emp-area').value='';
-  document.getElementById('emp-puesto').value='4';
+  document.getElementById('emp-unidad').value='';
+  document.getElementById('emp-puesto').value='peon';
   document.getElementById('emp-puesto-desc').value='';
   document.getElementById('emp-ingreso').value='';
+  empActualizarZona();
   document.getElementById('msg-modal-emp').textContent='';
   document.getElementById('modal-empleado').style.display='flex';
 }
 
-function editarEmpleado(id,nombre,apellido,area,puesto,puestoDesc,ingreso){
+function editarEmpleado(id,nombre,apellido,unidad,puesto,puestoDesc,ingreso){
   document.getElementById('modal-emp-titulo').textContent='Editar empleado';
   document.getElementById('emp-edit-id').value=id;
   document.getElementById('emp-nombre').value=nombre;
   document.getElementById('emp-apellido').value=apellido;
-  document.getElementById('emp-area').value=area;
-  document.getElementById('emp-puesto').value=puesto||'4';
+  document.getElementById('emp-unidad').value=unidad||'';
+  document.getElementById('emp-puesto').value=puesto||'peon';
   document.getElementById('emp-puesto-desc').value=puestoDesc;
   document.getElementById('emp-ingreso').value=ingreso;
+  empActualizarZona();
   document.getElementById('msg-modal-emp').textContent='';
   document.getElementById('modal-empleado').style.display='flex';
 }
@@ -2069,17 +2111,21 @@ async function guardarEmpleado(){
   const id=document.getElementById('emp-edit-id').value;
   const nombre=document.getElementById('emp-nombre').value.trim();
   const apellido=document.getElementById('emp-apellido').value.trim();
-  const area=document.getElementById('emp-area').value.trim();
+  const unidad=document.getElementById('emp-unidad').value;
   const puesto=document.getElementById('emp-puesto').value;
   const puestoDesc=document.getElementById('emp-puesto-desc').value.trim();
   const ingreso=document.getElementById('emp-ingreso').value||null;
   if(!nombre){msgEl.textContent='El nombre es obligatorio.';msgEl.style.color='var(--danger)';return;}
+  if(!unidad){msgEl.textContent='Elegí la Unidad de Negocio.';msgEl.style.color='var(--danger)';return;}
+  // La zona de evaluación se deriva de la unidad (Administración/Personal GQ no tienen)
+  const ZONA_POR_UNIDAD={'Corrientes':'Norte','Oeste':'Prov. Bs As','Tandil':'Prov. Bs As','Mar del Plata':'Prov. Bs As','Mendoza':'Mendoza'};
+  const zona=ZONA_POR_UNIDAD[unidad]||null;
   msgEl.textContent='Guardando...';msgEl.style.color='var(--muted)';
   let error;
   if(id){
-    ({error}=await sb.from('empleados').update({nombre,apellido,area,puesto_codigo:puesto,puesto_descripcion:puestoDesc,fecha_ingreso:ingreso}).eq('id',id));
+    ({error}=await sb.from('empleados').update({nombre,apellido,unidad_negocio:unidad,zona_evaluacion:zona,puesto_codigo:puesto,puesto_descripcion:puestoDesc,fecha_ingreso:ingreso}).eq('id',id));
   }else{
-    ({error}=await sb.from('empleados').insert({nombre,apellido,area,puesto_codigo:puesto,puesto_descripcion:puestoDesc,fecha_ingreso:ingreso,activo:true}));
+    ({error}=await sb.from('empleados').insert({nombre,apellido,area:unidad,unidad_negocio:unidad,zona_evaluacion:zona,puesto_codigo:puesto,puesto_descripcion:puestoDesc,fecha_ingreso:ingreso,activo:true}));
   }
   if(error){msgEl.textContent='Error: '+error.message;msgEl.style.color='var(--danger)';}
   else{document.getElementById('modal-empleado').style.display='none';renderRRHH();}

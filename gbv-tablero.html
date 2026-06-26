@@ -1690,36 +1690,36 @@ async function renderRRHH(){
   let query=sb.from('empleados').select('*').eq('activo',true).order('apellido');
   const{data:todosEmpleados}=await query;
 
-  // Si no es directivo, filtrar solo los que evalúa
-  let misEmpleados=todosEmpleados||[];
-  if(!esDirectivo){
-    const{data:evalRel}=await sb.from('evaluadores_empleado')
-      .select('empleado_id').eq('evaluador_user_id',currentUser.id).eq('activo',true);
-    const idsFijos=(evalRel||[]).map(e=>e.empleado_id);
-
-    // Evaluador automático por rol de campo: si el usuario actual es el Encargado
-    // activo de algún campo (puesto_codigo de liderazgo + su propio nombre/apellido
-    // matchea con su perfil), evalúa automáticamente a todo el personal de campo
-    // (Capataz, Peón, Puestero, Tractorista) de ESE campo específico, sin que haga
-    // falta una fila fija en evaluadores_empleado. Si el día de mañana cambia quién
-    // es el Encargado, esto se recalcula solo con cada carga de pantalla.
-    const PUESTOS_ENCARGADO=['encargado'];
-    const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
-    const miEmpleadoComoEncargado=(todosEmpleados||[]).find(e=>
-      PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
-      normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
-      normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
-    );
-    let idsAutomaticos=[];
-    if(miEmpleadoComoEncargado){
-      idsAutomaticos=(todosEmpleados||[])
-        .filter(e=>PUESTOS_CAMPO_AUTOMATICOS.includes(e.puesto_codigo)&&e.unidad_negocio===miEmpleadoComoEncargado.unidad_negocio)
-        .map(e=>e.id);
-    }
-
-    const ids=[...new Set([...idsFijos,...idsAutomaticos])];
-    misEmpleados=misEmpleados.filter(e=>ids.includes(e.id));
+  // ── A quién evalúa REALMENTE el usuario (fijo + automático por encargado) ──
+  // Define dos cosas distintas: qué lista VE (abajo) y en cuáles puede EDITAR la evaluación.
+  const{data:evalRel}=await sb.from('evaluadores_empleado')
+    .select('empleado_id').eq('evaluador_user_id',currentUser.id).eq('activo',true);
+  const idsFijos=(evalRel||[]).map(e=>e.empleado_id);
+  // Evaluador automático por rol de campo: si el usuario es el Encargado activo de una
+  // unidad, evalúa a su personal de campo (Capataz/Peón/Puestero/Tractorista). Se recalcula
+  // solo si cambia el Encargado, sin tocar la base.
+  const PUESTOS_ENCARGADO=['encargado'];
+  const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
+  const miEmpleadoComoEncargado=(todosEmpleados||[]).find(e=>
+    PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
+    normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
+    normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
+  );
+  let idsAutomaticos=[];
+  if(miEmpleadoComoEncargado){
+    idsAutomaticos=(todosEmpleados||[])
+      .filter(e=>PUESTOS_CAMPO_AUTOMATICOS.includes(e.puesto_codigo)&&e.unidad_negocio===miEmpleadoComoEncargado.unidad_negocio)
+      .map(e=>e.id);
   }
+  const idsEvaluables=new Set([...idsFijos,...idsAutomaticos]);
+  // Programador edita a todos (mismo failsafe que en abrirEvaluacion)
+  const idsQueEvaluo = currentProfile.rol==='programador'
+    ? new Set((todosEmpleados||[]).map(e=>e.id))
+    : idsEvaluables;
+
+  // La LISTA que se muestra: directivos ven a TODOS; el resto solo a los que evalúan.
+  // (Aunque un directivo vea a todos, abajo solo podrá EDITAR los de idsQueEvaluo.)
+  const misEmpleados = esDirectivo ? (todosEmpleados||[]) : (todosEmpleados||[]).filter(e=>idsEvaluables.has(e.id));
 
   const periodo=getPeriodoActual();
 
@@ -1729,7 +1729,7 @@ async function renderRRHH(){
   const evalsPorEmpleado={};
   (evals||[]).forEach(e=>{ if(!evalsPorEmpleado[e.empleado_id]) evalsPorEmpleado[e.empleado_id]=[]; evalsPorEmpleado[e.empleado_id].push(e); });
 
-  const pendientes=misEmpleados.filter(e=>!evalsPorEmpleado[e.id]||evalsPorEmpleado[e.id].every(ev=>ev.estado==='borrador')).length;
+  const pendientes=(todosEmpleados||[]).filter(e=>idsQueEvaluo.has(e.id)&&(!evalsPorEmpleado[e.id]||evalsPorEmpleado[e.id].every(ev=>ev.estado==='borrador'))).length;
 
   main.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
@@ -1749,7 +1749,7 @@ async function renderRRHH(){
       ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>${puedeEditarRRHH?`<button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button><button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button><button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}`:''}
       ${['programador','coo'].includes(currentProfile.rol)?`<button class="tab-btn" onclick="rrhhTab('preparar-ronda',this)">🗓️ Preparar ronda</button>`:''}
     </div>
-    <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo)}</div>
+    <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo,idsQueEvaluo)}</div>
 
     <!-- Modal agregar/editar empleado -->
     <div id="modal-empleado" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
@@ -1832,16 +1832,18 @@ async function renderRRHH(){
       </div>
     </div>
   `;
-  window._rrhhData={misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo};
+  window._rrhhData={misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo,idsQueEvaluo};
 }
 
-function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo){
+function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo,idsQueEvaluo){
+  idsQueEvaluo=idsQueEvaluo||new Set();
   if(empleados.length===0) return`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No tenés empleados asignados para evaluar.</div></div>`;
   return`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem">
     ${empleados.map(emp=>{
       const evs=evalsPorEmpleado[emp.id]||[];
       const miEval=evs.find(e=>e.evaluador_user_id===currentUser.id);
       const estado=miEval?.estado||'pendiente';
+      const yoEvaluo=idsQueEvaluo.has(emp.id);
       let badgeClass='badge-pend',badgeLabel='Pendiente';
       if(estado==='aprobado'){badgeClass='badge-ok';badgeLabel='Aprobado';}
       else if(estado==='enviado'){badgeClass='badge-info';badgeLabel='Enviado';}
@@ -1854,17 +1856,21 @@ function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo){
             <div style="font-size:.75rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''}</div>
             ${esLider?`<span class="badge badge-info" style="margin-top:4px;font-size:.68rem">Encargado/Responsable</span>`:''}
           </div>
-          <span class="badge ${badgeClass}">${badgeLabel}</span>
+          ${yoEvaluo?`<span class="badge ${badgeClass}">${badgeLabel}</span>`:`<span class="badge badge-na" style="opacity:.7">Solo lectura</span>`}
         </div>
-        ${miEval&&miEval.bono_calculado?`
+        ${yoEvaluo&&miEval&&miEval.bono_calculado?`
           <div style="font-size:.78rem;margin-bottom:.5rem">
             <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Puntaje actitudinal</span><span>${miEval.puntaje_actitudinal} pts → ${miEval.porcentaje_actitudinal}%</span></div>
             <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Puntaje objetivos</span><span>${miEval.puntaje_objetivos} pts → ${miEval.porcentaje_objetivos}%</span></div>
             <div style="display:flex;justify-content:space-between;font-weight:500;margin-top:4px"><span style="color:var(--muted)">Bono calculado</span><span style="color:var(--accent)">$${miEval.bono_calculado.toLocaleString('es-AR')}</span></div>
           </div>`:''}
-        <button class="btn btn-accent btn-sm" style="width:100%" onclick="abrirEvaluacion('${emp.id}')">
-          ${estado==='pendiente'?'Iniciar evaluación':estado==='borrador'?'Continuar evaluación':estado==='enviado'?'Ver evaluación enviada':'Ver evaluación aprobada'}
-        </button>
+        ${yoEvaluo
+          ? `<button class="btn btn-accent btn-sm" style="width:100%" onclick="abrirEvaluacion('${emp.id}')">
+              ${estado==='pendiente'?'Iniciar evaluación':estado==='borrador'?'Continuar evaluación':estado==='enviado'?'Ver evaluación enviada':'Ver evaluación aprobada'}
+            </button>`
+          : `<button class="btn btn-sm" style="width:100%;color:var(--muted)" onclick="abrirEvaluacion('${emp.id}')">
+              Ver evaluación
+            </button>`}
       </div>`;
     }).join('')}
   </div>`;
@@ -1873,9 +1879,9 @@ function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo){
 function rrhhTab(tab,btn){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  const{misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo}=window._rrhhData;
+  const{misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo,idsQueEvaluo}=window._rrhhData;
   const panel=document.getElementById('rrhh-panel');
-  if(tab==='evaluar') panel.innerHTML=renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo);
+  if(tab==='evaluar') panel.innerHTML=renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo,idsQueEvaluo);
   if(tab==='resumen') panel.innerHTML=renderRRHHResumen(todosEmpleados,evalsPorEmpleado,periodo);
   if(tab==='aprobar') panel.innerHTML=renderRRHHAprobar(todosEmpleados,evalsPorEmpleado,periodo);
   if(tab==='personal') panel.innerHTML=renderRRHHPersonal(todosEmpleados);

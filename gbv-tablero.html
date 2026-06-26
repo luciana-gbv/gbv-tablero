@@ -1685,6 +1685,7 @@ async function renderRRHH(){
   main.innerHTML='<div class="loading">Cargando...</div>';
   const esDirectivo=['programador','directorio','coo','directorio_lectura'].includes(currentProfile.rol);
   const puedeEditarRRHH=puedeEditar('rrhh');
+  const esAprobadorBonos=['programador','directorio','coo'].includes(currentProfile.rol);
 
   // Cargar empleados que corresponden según rol
   let query=sb.from('empleados').select('*').eq('activo',true).order('apellido');
@@ -1746,7 +1747,7 @@ async function renderRRHH(){
 
     <div class="tab-row">
       <button class="tab-btn active" onclick="rrhhTab('evaluar',this)">Evaluar empleados</button>
-      ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>${puedeEditarRRHH?`<button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button><button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button><button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}`:''}
+      ${esDirectivo?`<button class="tab-btn" onclick="rrhhTab('resumen',this)">Resumen del equipo</button>${esAprobadorBonos?`<button class="tab-btn" onclick="rrhhTab('aprobar',this)">Aprobar bonos</button>`:''}${puedeEditarRRHH?`<button class="tab-btn" onclick="rrhhTab('personal',this)">Gestión personal</button><button class="tab-btn" onclick="rrhhTab('archivados-emp',this)">Archivados</button>`:''}`:''}
       ${['programador','coo'].includes(currentProfile.rol)?`<button class="tab-btn" onclick="rrhhTab('preparar-ronda',this)">🗓️ Preparar ronda</button>`:''}
     </div>
     <div id="rrhh-panel">${renderRRHHEvaluar(misEmpleados,evalsPorEmpleado,periodo,idsQueEvaluo)}</div>
@@ -3478,9 +3479,9 @@ async function renderAdminCampos(panel){
                     <span style="font-size:.72rem;background:#FEF3CD;color:#7A5A00;padding:2px 7px;border-radius:var(--radius)">🌾 ${h.hectareas_agricolas?.toLocaleString('es-AR')||'—'} ha</span>
                     <span style="font-size:.72rem;background:#F5F3EE;color:var(--muted);padding:2px 7px;border-radius:var(--radius)">⬜ ${h.hectareas_improductivas?.toLocaleString('es-AR')||'—'} ha</span>
                   `:`<span style="font-size:.72rem;color:var(--warning)">Sin datos ${anio}</span>`}
-                  <button class="btn btn-sm" onclick="abrirModalHa('${c.id}','${c.nombre.replace(/'/g,"\\'")}',${haTotal},'${h?.id||''}',${h?.hectareas_ganaderas||0},${h?.hectareas_agricolas||0},${h?.hectareas_improductivas||0},'${(h?.notas||'').replace(/'/g,"\\'")}')">
+                  ${['programador','coo'].includes(currentProfile.rol)?`<button class="btn btn-sm" onclick="abrirModalHa('${c.id}','${c.nombre.replace(/'/g,"\\'")}',${haTotal},'${h?.id||''}',${h?.hectareas_ganaderas||0},${h?.hectareas_agricolas||0},${h?.hectareas_improductivas||0},'${(h?.notas||'').replace(/'/g,"\\'")}')">
                     ${cargado?'✏️ Editar':'+ Cargar'}
-                  </button>
+                  </button>`:''}
                   ${cargado?`<button class="btn btn-sm" onclick="verHistoricoHa('${c.id}','${c.nombre.replace(/'/g,"\\'")}')">📋 Historial</button>`:''}
                 </div>
               </div>
@@ -3641,12 +3642,13 @@ let hacCampoActual=null; // datos crudos parseados del excel antes de confirmar
 
 async function renderHacienda(){
   const main=document.getElementById('main-content');
+  const puedeCargarHac=puedeEditar('hacienda');
   main.innerHTML=`
     <div class="section-heading">Planillas de hacienda</div>
     <div class="section-sub">Carga mensual y consulta histórica de existencia ganadera</div>
     <div class="tab-row">
-      <button class="tab-btn active" onclick="hacSwitchTab('cargar',this)">↑ Cargar planilla</button>
-      <button class="tab-btn" onclick="hacSwitchTab('consultar',this)">🔍 Consultar histórico</button>
+      ${puedeCargarHac?`<button class="tab-btn active" onclick="hacSwitchTab('cargar',this)">↑ Cargar planilla</button>`:''}
+      <button class="tab-btn ${puedeCargarHac?'':'active'}" onclick="hacSwitchTab('consultar',this)">🔍 Consultar histórico</button>
     </div>
     <div id="hac-content"></div>
 
@@ -3660,7 +3662,7 @@ async function renderHacienda(){
         </div>
       </div>
     </div>`;
-  hacSwitchTab('cargar');
+  hacSwitchTab(puedeCargarHac?'cargar':'consultar');
 }
 
 function hacSwitchTab(tab,btn){
@@ -3675,6 +3677,10 @@ function hacSwitchTab(tab,btn){
 // ──────────────── CARGAR PLANILLA ────────────────
 function renderHacCargar(){
   const el=document.getElementById('hac-content');
+  if(!puedeEditar('hacienda')){
+    el.innerHTML=`<div class="card"><div class="locked"><div style="font-size:2rem;margin-bottom:.5rem">🔒</div><div style="font-size:.85rem">Solo lectura. La carga de planillas la realiza el área de hacienda.</div></div></div>`;
+    return;
+  }
   el.innerHTML=`
     <div class="card" style="margin-bottom:1rem">
       <div class="card-title">Subir planilla mensual</div>

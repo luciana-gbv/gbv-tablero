@@ -166,6 +166,10 @@ const SUPA_KEY='sb_publishable_Wcf8KQPElBsMKmRF3kaD8Q_o7k5dXGT';
 const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
 let currentUser=null,currentProfile=null,currentTab='resumen';
 let allCampos=[],allUnidades=[],allIndicadores=[],misCampos=[];
+// Filtro de vencidos por responsable: veTodoIndicadores=true => sin filtro (ve todo);
+// si no, misIndicadoresResp = Set de indicador_id de los que la persona es responsable.
+let veTodoIndicadores=false, misIndicadoresResp=null;
+function esMiIndicador(indId){ return veTodoIndicadores || (misIndicadoresResp && misIndicadoresResp.has(indId)); }
 let currentPermisos={};
 let selectedCampo=null,selectedCat=null;
 const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo',hacienda:'Hacienda',directorio_lectura:'Directorio (solo lectura)'};
@@ -242,6 +246,14 @@ async function initApp(user){
     sb.from('indicadores').select('*').eq('activo',true).order('orden')
   ]);
   allCampos=campos||[];allUnidades=unidades||[];allIndicadores=indicadores||[];
+  // ── Quién ve qué vencidos: los 4 roles de control ven todo; el resto solo lo suyo ──
+  veTodoIndicadores=['programador','directorio','coo','directorio_lectura'].includes(currentProfile.rol);
+  if(veTodoIndicadores){
+    misIndicadoresResp=null;
+  }else{
+    const{data:misResp}=await sb.from('indicador_responsables').select('indicador_id').eq('user_id',user.id);
+    misIndicadoresResp=new Set((misResp||[]).map(r=>r.indicador_id));
+  }
   const{data:permisos}=await sb.from('permisos_rol').select('modulo,puede_ver,puede_editar').eq('rol',currentProfile.rol);
   currentPermisos={};
   (permisos||[]).forEach(p=>{currentPermisos[p.modulo]={puede_ver:p.puede_ver,puede_editar:p.puede_editar};});
@@ -279,6 +291,7 @@ async function mostrarAlertas(){
 
   const vencidos=[], manana=[], enSemana=[];
   allIndicadores.forEach(ind=>{
+    if(!esMiIndicador(ind.id)) return; // cada persona ve solo los suyos (los 4 roles de control ven todo)
     const fechas=getVencimientosAnio(ind,anio);
     fechas.forEach(f=>{
       const key=ind.id+'_'+f.toISOString().split('T')[0];
@@ -1346,9 +1359,10 @@ async function renderCalendario(){
   const{data:indicadores}=await sb.from('indicadores')
     .select('*').eq('activo',true).order('categoria').order('orden');
 
-  // Generar todos los vencimientos del año
+  // Generar todos los vencimientos del año (solo de los indicadores que la persona ve)
   const vencimientos=[];
   (indicadores||[]).forEach(ind=>{
+    if(!esMiIndicador(ind.id)) return; // mismo criterio que el cartel de alertas
     const fechas=getVencimientosAnio(ind, anio);
     fechas.forEach(f=>vencimientos.push({...ind, fecha_venc:f}));
   });

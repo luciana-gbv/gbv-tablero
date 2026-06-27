@@ -4011,6 +4011,7 @@ async function renderHacConsultar(){
         <div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.25rem">
           <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="total" checked/> Total por campo (resumen)</label>
           <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="planilla"/> Planilla completa (desglose por categoría)</label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="comparar"/> Comparar períodos por categoría (lado a lado)</label>
         </div>
       </div>
       <div class="form-group" style="display:flex;align-items:center;gap:.5rem">
@@ -4058,7 +4059,9 @@ async function hacBuscar(){
   if(camposSel.length>0)queryCom=queryCom.in('campo',camposSel);
   const{data:comentarios}=await queryCom;
 
-  if(vista==='planilla'){
+  if(vista==='comparar'){
+    hacRenderComparar(regs,comentarios||[],periodosSel);
+  }else if(vista==='planilla'){
     hacRenderPlanilla(regs,comentarios||[],periodosSel,modoSuma);
   }else if(modoSuma){
     hacRenderSuma(regs,comentarios||[],periodosSel);
@@ -4165,6 +4168,49 @@ function hacRenderPlanilla(regs,comentarios,periodosSel,modoSuma){
     }).join('');
   }
   resEl.innerHTML=bloques+hacComentariosHtml(comentarios);
+}
+
+// Comparar períodos lado a lado: columnas = períodos, filas = categorías (desglosada) o grupos (resumen).
+// Campos: consolida los campos que pasaron el filtro. Variación: cada columna vs la anterior.
+let _hacCmp=null;
+function hacRenderComparar(regs,comentarios,periodosSel){
+  const periodsAsc=[...periodosSel].sort();
+  const agg={};periodsAsc.forEach(p=>agg[p]={});
+  regs.forEach(r=>{const k=r.grupo+'|'+r.categoria;agg[r.periodo][k]=(agg[r.periodo][k]||0)+r.cantidad;});
+  _hacCmp={periodsAsc,agg,comentarios:comentarios||[],modo:'des'};
+  hacPintarComparar();
+}
+function hacDeltaHtml(prev,cur){
+  if(prev===undefined||prev===null||prev===0)return'';
+  const pc=Math.round((cur-prev)/prev*100);
+  const up=pc>=0;
+  return`<div style="font-size:.66rem;color:${up?'var(--success)':'var(--danger)'};margin-top:1px">${up?'▲ +':'▼ '}${pc}%</div>`;
+}
+function hacPintarComparar(){
+  const resEl=document.getElementById('hac-result');
+  const{periodsAsc,agg,comentarios,modo}=_hacCmp;
+  const grupos=[...new Set(HAC_CATEGORIAS.map(c=>c.grupo))];
+  const valsKey=k=>periodsAsc.map(p=>agg[p][k]||0);
+  const valsGrupo=g=>periodsAsc.map(p=>HAC_CATEGORIAS.filter(c=>c.grupo===g).reduce((a,c)=>a+(agg[p][g+'|'+c.label]||0),0));
+  const valsTotal=()=>periodsAsc.map(p=>Object.values(agg[p]).reduce((a,b)=>a+b,0));
+  const celdas=vals=>vals.map((v,i)=>`<td style="text-align:right">${v.toLocaleString('es-AR')}${i>0?hacDeltaHtml(vals[i-1],v):''}</td>`).join('');
+  let body='';
+  grupos.forEach(g=>{
+    if(modo==='des'){
+      body+=`<tr style="background:var(--bg)"><td colspan="${periodsAsc.length+1}" style="font-weight:600;font-size:.78rem">${g}</td></tr>`;
+      HAC_CATEGORIAS.filter(c=>c.grupo===g).forEach(c=>{body+=`<tr><td style="padding-left:1.2rem">${c.label}</td>${celdas(valsKey(g+'|'+c.label))}</tr>`;});
+      body+=`<tr style="color:var(--muted);font-weight:500"><td style="padding-left:1.2rem">Subtotal ${g}</td>${celdas(valsGrupo(g))}</tr>`;
+    }else{
+      body+=`<tr><td>${g}</td>${celdas(valsGrupo(g))}</tr>`;
+    }
+  });
+  body+=`<tr style="border-top:2px solid var(--border);font-weight:700"><td>TOTAL cabezas</td>${celdas(valsTotal())}</tr>`;
+  const head=`<thead><tr><th style="text-align:left">Categoría</th>${periodsAsc.map(p=>`<th style="text-align:right">${hacFormatPeriodo(p)}</th>`).join('')}</tr></thead>`;
+  const toggle=`<div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+    <button class="btn btn-sm ${modo==='res'?'btn-accent':''}" onclick="_hacCmp.modo='res';hacPintarComparar()">Resumen</button>
+    <button class="btn btn-sm ${modo==='des'?'btn-accent':''}" onclick="_hacCmp.modo='des';hacPintarComparar()">Desglosada</button>
+  </div>`;
+  resEl.innerHTML=`<div class="card" style="margin-bottom:1rem"><div class="card-title">Comparar períodos — variación vs. columna anterior</div>${toggle}<div class="table-wrap"><table>${head}<tbody>${body}</tbody></table></div></div>${hacComentariosHtml(comentarios)}`;
 }
 
 function hacComentariosHtml(comentarios){

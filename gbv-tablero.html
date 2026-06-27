@@ -4183,8 +4183,9 @@ let _hacCmp=null;
 function hacRenderComparar(regs,comentarios,periodosSel){
   const periodsAsc=[...periodosSel].sort();
   const agg={};periodsAsc.forEach(p=>agg[p]={});
-  regs.forEach(r=>{const k=r.grupo+'|'+r.categoria;agg[r.periodo][k]=(agg[r.periodo][k]||0)+r.cantidad;});
-  _hacCmp={periodsAsc,agg,comentarios:comentarios||[],modo:'des'};
+  const presentes=new Set();
+  regs.forEach(r=>{const k=r.grupo+'|'+r.categoria;agg[r.periodo][k]=(agg[r.periodo][k]||0)+r.cantidad;presentes.add(k);});
+  _hacCmp={periodsAsc,agg,presentes,comentarios:comentarios||[],modo:'des'};
   hacPintarComparar();
 }
 function hacDeltaHtml(prev,cur){
@@ -4195,17 +4196,19 @@ function hacDeltaHtml(prev,cur){
 }
 function hacPintarComparar(){
   const resEl=document.getElementById('hac-result');
-  const{periodsAsc,agg,comentarios,modo}=_hacCmp;
+  const{periodsAsc,agg,presentes,comentarios,modo}=_hacCmp;
   const grupos=[...new Set(HAC_CATEGORIAS.map(c=>c.grupo))];
+  const catsDe=g=>HAC_CATEGORIAS.filter(c=>c.grupo===g&&presentes.has(g+'|'+c.label));
+  const gruposPresentes=grupos.filter(g=>catsDe(g).length>0);
   const valsKey=k=>periodsAsc.map(p=>agg[p][k]||0);
-  const valsGrupo=g=>periodsAsc.map(p=>HAC_CATEGORIAS.filter(c=>c.grupo===g).reduce((a,c)=>a+(agg[p][g+'|'+c.label]||0),0));
+  const valsGrupo=g=>periodsAsc.map(p=>catsDe(g).reduce((a,c)=>a+(agg[p][g+'|'+c.label]||0),0));
   const valsTotal=()=>periodsAsc.map(p=>Object.values(agg[p]).reduce((a,b)=>a+b,0));
   const celdas=vals=>vals.map((v,i)=>`<td style="text-align:right">${v.toLocaleString('es-AR')}${i>0?hacDeltaHtml(vals[i-1],v):''}</td>`).join('');
   let body='';
-  grupos.forEach(g=>{
+  gruposPresentes.forEach(g=>{
     if(modo==='des'){
       body+=`<tr style="background:var(--bg)"><td colspan="${periodsAsc.length+1}" style="font-weight:600;font-size:.78rem">${g}</td></tr>`;
-      HAC_CATEGORIAS.filter(c=>c.grupo===g).forEach(c=>{body+=`<tr><td style="padding-left:1.2rem">${c.label}</td>${celdas(valsKey(g+'|'+c.label))}</tr>`;});
+      catsDe(g).forEach(c=>{body+=`<tr><td style="padding-left:1.2rem">${c.label}</td>${celdas(valsKey(g+'|'+c.label))}</tr>`;});
       body+=`<tr style="color:var(--muted);font-weight:500"><td style="padding-left:1.2rem">Subtotal ${g}</td>${celdas(valsGrupo(g))}</tr>`;
     }else{
       body+=`<tr><td>${g}</td>${celdas(valsGrupo(g))}</tr>`;

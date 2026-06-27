@@ -3930,10 +3930,40 @@ async function hacGuardarEnSupabase(periodo,registros,comentarios){
 }
 
 // ──────────────── CONSULTAR HISTÓRICO ────────────────
+let _hacPeriodos=[];
+
+async function hacVerConsolidado(){ await hacMostrarMes(0); }
+
+// Muestra la planilla consolidada completa de un mes (todos los campos), con navegación.
+// _hacPeriodos está ordenado del más nuevo (idx 0) al más viejo, así que:
+// "Mes anterior" = idx+1 (más viejo), "Mes siguiente" = idx-1 (más nuevo).
+async function hacMostrarMes(idx){
+  const resEl=document.getElementById('hac-result');
+  if(!_hacPeriodos.length){resEl.innerHTML='<div class="card"><div style="padding:1rem;color:var(--muted)">No hay períodos cargados.</div></div>';return;}
+  idx=Math.max(0,Math.min(_hacPeriodos.length-1,idx));
+  const periodo=_hacPeriodos[idx];
+  resEl.innerHTML='<div class="loading">Cargando planilla...</div>';
+  const[{data:regs},{data:comentarios}]=await Promise.all([
+    sb.from('hacienda_historico').select('*').eq('periodo',periodo).range(0,19999),
+    sb.from('hacienda_comentarios').select('*').eq('periodo',periodo).range(0,19999)
+  ]);
+  const campos=[...new Set((regs||[]).map(r=>r.campo))].sort();
+  const hayAnterior=idx<_hacPeriodos.length-1;
+  const haySiguiente=idx>0;
+  const nav=`<div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:0 0 1rem">
+    <button class="btn btn-sm" ${hayAnterior?`onclick="hacMostrarMes(${idx+1})"`:'disabled style="opacity:.4;cursor:not-allowed"'}>← Mes anterior</button>
+    <span style="font-weight:600">${hacFormatPeriodo(periodo)}</span>
+    <button class="btn btn-sm" ${haySiguiente?`onclick="hacMostrarMes(${idx-1})"`:'disabled style="opacity:.4;cursor:not-allowed"'}>Mes siguiente →</button>
+  </div>`;
+  const tabla=(regs&&regs.length)?hacPlanillaTabla(regs,campos):'<div style="padding:1rem;color:var(--muted)">No hay datos para este mes.</div>';
+  resEl.innerHTML=`<div class="card" style="margin-bottom:1rem"><div class="card-title">Planilla consolidada — ${hacFormatPeriodo(periodo)}</div>${nav}<div class="table-wrap">${tabla}</div></div>${hacComentariosHtml(comentarios||[])}`;
+}
+
 async function renderHacConsultar(){
   const el=document.getElementById('hac-content');
   const{data:historicoTodo}=await sb.from('hacienda_historico').select('periodo,campo').range(0,19999);
   const periodos=[...new Set((historicoTodo||[]).map(p=>p.periodo))].sort().reverse();
+  _hacPeriodos=periodos;
   const campos=[...new Set((historicoTodo||[]).map(c=>c.campo))].sort();
 
   el.innerHTML=`
@@ -3974,6 +4004,7 @@ async function renderHacConsultar(){
         <label for="hac-modo-suma" style="font-size:.82rem;cursor:pointer">Sumar los períodos seleccionados en un solo total (en vez de mostrarlos separados)</label>
       </div>
       <button class="btn btn-accent" onclick="hacBuscar()">Buscar</button>
+      <button class="btn" onclick="hacVerConsolidado()" style="margin-left:.5rem">📋 Ver planilla del último mes</button>
     </div>
     <div id="hac-result"></div>`;
 }

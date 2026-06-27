@@ -4009,19 +4009,26 @@ async function renderHacConsultar(){
       <div class="form-group">
         <label class="form-label">Cómo querés ver el resultado</label>
         <div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.25rem">
-          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="total" checked/> Total por campo (resumen)</label>
-          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="planilla"/> Planilla completa (desglose por categoría)</label>
-          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="comparar"/> Comparar períodos por categoría (lado a lado)</label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="total" checked onchange="hacSyncBtnBuscar()"/> Total por campo (resumen)</label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="planilla" onchange="hacSyncBtnBuscar()"/> Planilla completa (desglose por categoría)</label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="comparar" onchange="hacSyncBtnBuscar()"/> Comparar períodos por categoría (lado a lado)</label>
         </div>
       </div>
       <div class="form-group" style="display:flex;align-items:center;gap:.5rem">
         <input type="checkbox" id="hac-modo-suma"/>
         <label for="hac-modo-suma" style="font-size:.82rem;cursor:pointer">Sumar los períodos seleccionados en un solo total (en vez de mostrarlos separados)</label>
       </div>
-      <button class="btn btn-accent" onclick="hacBuscar()">Buscar</button>
+      <button class="btn btn-accent" id="hac-btn-buscar" onclick="hacBuscar()">Buscar</button>
       <button class="btn" onclick="hacVerConsolidado()" style="margin-left:.5rem">📋 Ver planilla del último mes</button>
     </div>
     <div id="hac-result"></div>`;
+}
+
+// Cambia el texto del botón según la vista elegida, para que la acción sea obvia
+function hacSyncBtnBuscar(){
+  const v=document.querySelector('input[name="hac-vista"]:checked')?.value;
+  const btn=document.getElementById('hac-btn-buscar');
+  if(btn)btn.textContent=v==='comparar'?'Comparar períodos':v==='planilla'?'Ver planilla':'Buscar';
 }
 
 function hacFormatPeriodo(p){

@@ -3959,9 +3959,23 @@ async function hacMostrarMes(idx){
   resEl.innerHTML=`<div class="card" style="margin-bottom:1rem"><div class="card-title">Planilla consolidada — ${hacFormatPeriodo(periodo)}</div>${nav}<div class="table-wrap">${tabla}</div></div>${hacComentariosHtml(comentarios||[])}`;
 }
 
+// Trae TODAS las filas en tandas, sorteando el tope de filas del servidor de Supabase
+// (que recorta los resultados aunque se pida un range grande).
+async function hacFetchPaginado(buildQuery){
+  let from=0;const size=1000;const todo=[];
+  while(true){
+    const{data}=await buildQuery(from,from+size-1);
+    if(!data||!data.length)break;
+    todo.push(...data);
+    if(data.length<size)break;
+    from+=size;
+  }
+  return todo;
+}
+
 async function renderHacConsultar(){
   const el=document.getElementById('hac-content');
-  const{data:historicoTodo}=await sb.from('hacienda_historico').select('periodo,campo').range(0,19999);
+  const historicoTodo=await hacFetchPaginado((f,t)=>sb.from('hacienda_historico').select('periodo,campo').range(f,t));
   const periodos=[...new Set((historicoTodo||[]).map(p=>p.periodo))].sort().reverse();
   _hacPeriodos=periodos;
   const campos=[...new Set((historicoTodo||[]).map(c=>c.campo))].sort();
@@ -4027,10 +4041,11 @@ async function hacBuscar(){
 
   if(periodosSel.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">Elegí al menos un período.</div></div>';return;}
 
-  let query=sb.from('hacienda_historico').select('*').in('periodo',periodosSel).range(0,19999);
-  if(camposSel.length>0)query=query.in('campo',camposSel);
-  const{data:regsCrudos,error}=await query;
-  if(error){resEl.innerHTML=`<div class="card"><div style="color:var(--danger);padding:1rem">Error: ${error.message}</div></div>`;return;}
+  const regsCrudos=await hacFetchPaginado((f,t)=>{
+    let q=sb.from('hacienda_historico').select('*').in('periodo',periodosSel).range(f,t);
+    if(camposSel.length>0)q=q.in('campo',camposSel);
+    return q;
+  });
 
   // Filtrar por categoría usando clave compuesta grupo+categoria (evita confundir categorías con el mismo nombre en distinto grupo, ej. "Invernada" de Vaca vs de Novillos)
   const catsSelSet=new Set(catsSel);

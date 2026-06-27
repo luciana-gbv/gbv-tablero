@@ -3962,6 +3962,13 @@ async function renderHacConsultar(){
         </select>
         <div class="form-hint">Mantené Ctrl (o Cmd en Mac) apretado para elegir varios meses de distintos años.</div>
       </div>
+      <div class="form-group">
+        <label class="form-label">Cómo querés ver el resultado</label>
+        <div style="display:flex;flex-direction:column;gap:.35rem;margin-top:.25rem">
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="total" checked/> Total por campo (resumen)</label>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem;cursor:pointer"><input type="radio" name="hac-vista" value="planilla"/> Planilla completa (desglose por categoría)</label>
+        </div>
+      </div>
       <div class="form-group" style="display:flex;align-items:center;gap:.5rem">
         <input type="checkbox" id="hac-modo-suma"/>
         <label for="hac-modo-suma" style="font-size:.82rem;cursor:pointer">Sumar los períodos seleccionados en un solo total (en vez de mostrarlos separados)</label>
@@ -3985,6 +3992,7 @@ async function hacBuscar(){
   const catsSel=[...document.querySelectorAll('.hac-filtro-cat:checked')].map(c=>c.value); // formato "Grupo|Categoria"
   const periodosSel=[...document.getElementById('hac-filtro-periodos').selectedOptions].map(o=>o.value);
   const modoSuma=document.getElementById('hac-modo-suma').checked;
+  const vista=document.querySelector('input[name="hac-vista"]:checked')?.value||'total';
 
   if(periodosSel.length===0){resEl.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">Elegí al menos un período.</div></div>';return;}
 
@@ -4004,7 +4012,9 @@ async function hacBuscar(){
   if(camposSel.length>0)queryCom=queryCom.in('campo',camposSel);
   const{data:comentarios}=await queryCom;
 
-  if(modoSuma){
+  if(vista==='planilla'){
+    hacRenderPlanilla(regs,comentarios||[],periodosSel,modoSuma);
+  }else if(modoSuma){
     hacRenderSuma(regs,comentarios||[],periodosSel);
   }else{
     hacRenderComparativa(regs,comentarios||[],periodosSel);
@@ -4068,6 +4078,47 @@ function hacRenderComparativa(regs,comentarios,periodosSel){
       <div class="table-wrap">${tablaHtml}</div>
     </div>
     ${hacComentariosHtml(comentarios)}`;
+}
+
+// Planilla completa: filas = categorías (agrupadas por grupo, con subtotales), columnas = campos
+function hacPlanillaTabla(regsSub,campos){
+  const m={};campos.forEach(c=>m[c]={});
+  regsSub.forEach(r=>{const k=r.grupo+'|'+r.categoria;m[r.campo][k]=(m[r.campo][k]||0)+r.cantidad;});
+  const grupos=[...new Set(HAC_CATEGORIAS.map(c=>c.grupo))];
+  const totalCampo={};campos.forEach(c=>totalCampo[c]=0);let granTotal=0;
+  let html=`<table><thead><tr><th>Categoría</th>${campos.map(c=>`<th style="text-align:right">${c}</th>`).join('')}<th style="text-align:right">Total</th></tr></thead><tbody>`;
+  grupos.forEach(g=>{
+    const catsG=HAC_CATEGORIAS.filter(c=>c.grupo===g);
+    const subtot={};campos.forEach(c=>subtot[c]=0);
+    html+=`<tr style="background:var(--bg)"><td colspan="${campos.length+2}" style="font-weight:600;font-size:.78rem">${g}</td></tr>`;
+    catsG.forEach(cat=>{
+      const k=g+'|'+cat.label;let rowTot=0;
+      const celdas=campos.map(c=>{const v=m[c][k]||0;subtot[c]+=v;totalCampo[c]+=v;rowTot+=v;return`<td style="text-align:right">${v?v.toLocaleString('es-AR'):'—'}</td>`;}).join('');
+      granTotal+=rowTot;
+      html+=`<tr><td style="padding-left:1rem">${cat.label}</td>${celdas}<td style="text-align:right">${rowTot?rowTot.toLocaleString('es-AR'):'—'}</td></tr>`;
+    });
+    const subTotG=campos.reduce((a,c)=>a+subtot[c],0);
+    html+=`<tr style="color:var(--muted);font-weight:500"><td style="padding-left:1rem">Subtotal ${g}</td>${campos.map(c=>`<td style="text-align:right">${subtot[c].toLocaleString('es-AR')}</td>`).join('')}<td style="text-align:right">${subTotG.toLocaleString('es-AR')}</td></tr>`;
+  });
+  html+=`<tr style="border-top:2px solid var(--border);font-weight:700"><td>TOTAL</td>${campos.map(c=>`<td style="text-align:right">${totalCampo[c].toLocaleString('es-AR')}</td>`).join('')}<td style="text-align:right">${granTotal.toLocaleString('es-AR')}</td></tr>`;
+  return html+'</tbody></table>';
+}
+
+function hacRenderPlanilla(regs,comentarios,periodosSel,modoSuma){
+  const resEl=document.getElementById('hac-result');
+  let bloques='';
+  if(modoSuma||periodosSel.length===1){
+    const campos=[...new Set(regs.map(r=>r.campo))].sort();
+    const titulo=periodosSel.length===1?hacFormatPeriodo(periodosSel[0]):`Suma de ${periodosSel.length} períodos: ${periodosSel.map(hacFormatPeriodo).join(', ')}`;
+    bloques=`<div class="card" style="margin-bottom:1rem"><div class="card-title">Planilla completa — ${titulo}</div><div class="table-wrap">${hacPlanillaTabla(regs,campos)}</div></div>`;
+  }else{
+    bloques=[...periodosSel].sort().map(p=>{
+      const sub=regs.filter(r=>r.periodo===p);
+      const campos=[...new Set(sub.map(r=>r.campo))].sort();
+      return`<div class="card" style="margin-bottom:1rem"><div class="card-title">Planilla completa — ${hacFormatPeriodo(p)}</div><div class="table-wrap">${hacPlanillaTabla(sub,campos)}</div></div>`;
+    }).join('');
+  }
+  resEl.innerHTML=bloques+hacComentariosHtml(comentarios);
 }
 
 function hacComentariosHtml(comentarios){

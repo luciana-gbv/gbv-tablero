@@ -12,7 +12,7 @@
 <style>
 :root{--bg:#F5F3EE;--surface:#FFFFFF;--border:#E2DDD6;--text:#1A1916;--muted:#7A7570;--accent:#2D5A3D;--danger:#C0392B;--warning:#D4890A;--success:#2D5A3D;--info:#1A4A6B;--font-disp:'DM Serif Display',serif;--font-body:'DM Sans',sans-serif;--radius:10px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 12px rgba(0,0,0,0.04)}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{font-size:15px}body{font-family:var(--font-body);background:var(--bg);color:var(--text);min-height:100vh}
+html{font-size:15px;overflow-x:clip}body{font-family:var(--font-body);background:var(--bg);color:var(--text);min-height:100vh;overflow-x:clip;max-width:100%}
 #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center}
 .login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem;width:100%;max-width:380px;box-shadow:var(--shadow)}
 .login-logo{font-family:var(--font-disp);font-size:2rem;color:var(--accent);margin-bottom:.25rem}
@@ -35,7 +35,9 @@ html{font-size:15px}body{font-family:var(--font-body);background:var(--bg);color
 .nav-tab{padding:.85rem 1.1rem;font-size:.85rem;font-weight:500;color:var(--muted);border:none;background:transparent;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;font-family:var(--font-body);transition:all .15s}
 .nav-tab:hover{color:var(--text)}
 .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.main{padding:1.5rem;max-width:1100px;margin:0 auto;width:100%}
+.main{padding:1.5rem;max-width:1100px;margin:0 auto;width:100%;overflow-x:clip}
+#app{width:100%;max-width:100%;overflow-x:clip}
+#alerta-banner{overflow-x:clip}
 .section-heading{font-family:var(--font-disp);font-size:1.5rem;color:var(--text);margin-bottom:.25rem}
 .section-sub{font-size:.8rem;color:var(--muted);margin-bottom:1.5rem}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;box-shadow:var(--shadow)}

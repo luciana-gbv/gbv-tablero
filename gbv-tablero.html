@@ -435,7 +435,7 @@ const TAB_DEFS=[
   {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo','directorio_lectura']},
   {id:'inmuebles',label:'Inmuebles',roles:['programador','directorio','coo','operativo','directorio_lectura']},
   {id:'rrhh',label:'RRHH',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
-  {id:'puestos',label:'Puestos',roles:['programador','directorio','coo','directorio_lectura']},
+  {id:'puestos',label:'Instalaciones',roles:['programador','directorio','coo','directorio_lectura']},
   {id:'historico',label:'Históricos',roles:['programador','directorio','coo','operativo','directorio_lectura']},
   {id:'hacienda',label:'Planillas de hacienda',roles:['programador','directorio','coo','operativo','hacienda','directorio_lectura']},
   {id:'admin',label:'Administración',roles:['programador','coo']},
@@ -2958,9 +2958,30 @@ async function guardarAlertaInm(){
 }
 
 // ── PUESTOS ──
+// Deduce estado (habitado/desocupado/abandonado) a partir del texto de habitantes
+function puestoEstado(hab){
+  const h=(hab||'').toLowerCase();
+  if(h.includes('abandon'))return{cls:'badge-late',label:'Abandonado',tipo:'abandonado'};
+  if(h.includes('desocup'))return{cls:'badge-pend',label:'Desocupado',tipo:'desocupado'};
+  if(hab&&hab.trim())return{cls:'badge-ok',label:'Habitado',tipo:'habitado'};
+  return{cls:'badge-na',label:'Sin dato',tipo:'sindato'};
+}
+
 async function renderPuestos(){
   const main=document.getElementById('main-content');
-  const{data:puestos}=await sb.from('puestos').select('*,campos(nombre,unidades_negocio(nombre))').eq('activo',true).order('nombre');
+  const puedeEd=['programador','coo'].includes(currentProfile.rol);
+  const[{data:puestos},{data:hist}]=await Promise.all([
+    sb.from('puestos').select('*,campos(nombre,unidades_negocio(nombre))').eq('activo',true).order('nombre'),
+    sb.from('puestos_historico').select('*').order('anio',{ascending:false})
+  ]);
+  window._puestos=puestos||[];
+  // Histórico agrupado por instalación, de más nuevo a más viejo
+  const histPorPuesto={};
+  (hist||[]).forEach(h=>{(histPorPuesto[h.puesto_id]=histPorPuesto[h.puesto_id]||[]).push(h);});
+  Object.values(histPorPuesto).forEach(a=>a.sort((x,y)=>y.anio-x.anio));
+  window._histPorPuesto=histPorPuesto;
+  // Estado actual de cada instalación = el del año más reciente
+  const estadoActual=p=>{const h=histPorPuesto[p.id]?.[0];return puestoEstado(h?.habitantes);};
   const porCampo={};
   (puestos||[]).forEach(p=>{
     const key=p.campos?.nombre||'Sin campo';
@@ -2968,14 +2989,21 @@ async function renderPuestos(){
     porCampo[key].items.push(p);
   });
   const total=(puestos||[]).length;
-  const desocupados=(puestos||[]).filter(p=>p.habitantes&&p.habitantes.toLowerCase().includes('desocup')).length;
-  const abandonados=(puestos||[]).filter(p=>p.habitantes&&(p.habitantes.toLowerCase().includes('abandon'))).length;
+  const cuenta=t=>(puestos||[]).filter(p=>estadoActual(p).tipo===t).length;
+  const habitados=cuenta('habitado'), desocupados=cuenta('desocupado'), abandonados=cuenta('abandonado');
+  const anioActual=new Date().getFullYear();
+  const anios=[];for(let a=anioActual;a>=anioActual-10;a--)anios.push(a);
   main.innerHTML=`
-    <div class="section-heading">Puestos y construcciones</div>
-    <div class="section-sub">Estado de las viviendas por campo · datos 2025</div>
-    <div class="metrics-grid" style="margin-bottom:1.5rem">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+      <div>
+        <div class="section-heading">Instalaciones</div>
+        <div class="section-sub">Estado de las viviendas y construcciones por campo</div>
+      </div>
+      ${puedeEd?`<button class="btn btn-accent" onclick="abrirModalPuesto()">+ Agregar instalación</button>`:''}
+    </div>
+    <div class="metrics-grid" style="margin:1.25rem 0 1.5rem">
       <div class="metric-card"><div class="metric-label">Total</div><div class="metric-value">${total}</div></div>
-      <div class="metric-card"><div class="metric-label">Habitados</div><div class="metric-value" style="color:var(--success)">${total-desocupados-abandonados}</div></div>
+      <div class="metric-card"><div class="metric-label">Habitados</div><div class="metric-value" style="color:var(--success)">${habitados}</div></div>
       <div class="metric-card"><div class="metric-label">Desocupados</div><div class="metric-value" style="color:var(--warning)">${desocupados}</div></div>
       <div class="metric-card"><div class="metric-label">Abandonados</div><div class="metric-value" style="color:var(--danger)">${abandonados}</div></div>
     </div>
@@ -2983,23 +3011,181 @@ async function renderPuestos(){
       <div class="card" style="margin-bottom:1rem">
         <div class="card-title">${campo} <span class="badge badge-na" style="margin-left:.5rem;font-weight:400">${data.unidad}</span></div>
         ${data.items.map(p=>{
-          const hab=p.habitantes||'';
-          const esAbandonado=hab.toLowerCase().includes('abandon');
-          const esDesocupado=hab.toLowerCase().includes('desocup');
-          const bc=esAbandonado?'badge-late':esDesocupado?'badge-pend':'badge-ok';
-          const bl=esAbandonado?'Abandonado':esDesocupado?'Desocupado':'Habitado';
+          const h=histPorPuesto[p.id]||[];
+          const est=estadoActual(p);
+          const ultimos=h.slice(0,5);
+          const filas=ultimos.map(r=>{
+            const e=puestoEstado(r.habitantes);
+            const det=e.tipo==='habitado'&&r.habitantes?` — ${r.habitantes}`:'';
+            return`<div style="display:flex;gap:.5rem;font-size:.78rem;padding:.15rem 0"><span style="color:var(--muted);min-width:38px">${r.anio}</span><span>${e.label}${det}</span></div>`;
+          }).join('');
           return`<div class="puesto-card">
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">
               <div style="flex:1">
                 <div class="puesto-nombre">${p.nombre}</div>
-                ${hab?`<div class="puesto-hab">👤 ${hab}</div>`:''}
-                ${p.estado_2025?`<div class="puesto-estado">📝 ${p.estado_2025}</div>`:''}
+                ${p.descripcion?`<div class="puesto-hab">🏗️ ${p.descripcion}</div>`:''}
+                <div style="margin-top:.5rem">${filas||'<div style="font-size:.78rem;color:var(--muted)">Sin relevamientos cargados</div>'}</div>
+                ${h.length>5?`<button class="btn btn-sm" style="margin-top:.4rem" onclick='abrirHistPuesto("${p.id}")'>Ver histórico completo (${h.length} años) →</button>`:''}
               </div>
-              <span class="badge ${bc}">${bl}</span>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.5rem">
+                <span class="badge ${est.cls}">${est.label}</span>
+                ${puedeEd?`<div style="display:flex;gap:.35rem">
+                  <button class="btn btn-sm" onclick='abrirModalPuesto("${p.id}")'>✏️ Editar</button>
+                  <button class="btn btn-sm" onclick='pedirBajaPuesto("${p.id}")'>🗑️</button>
+                </div>`:''}
+              </div>
             </div>
           </div>`;
         }).join('')}
-      </div>`).join('')}`;
+      </div>`).join('')}
+    <div id="modal-hist-puesto" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow-y:auto">
+        <div class="card-title" id="mhp-title">Histórico</div>
+        <div id="mhp-body"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:1rem">
+          <button class="btn" onclick="document.getElementById('modal-hist-puesto').style.display='none'">Cerrar</button>
+        </div>
+      </div>
+    </div>
+    ${puedeEd?`
+    <div id="modal-puesto" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+      <div class="card" style="max-width:480px;width:100%;max-height:90vh;overflow-y:auto">
+        <div class="card-title" id="mp-title">Nueva instalación</div>
+        <input type="hidden" id="mp-id">
+        <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="mp-nombre" placeholder="Ej: Casa principal, Galpón, Puesto El Sauce"></div>
+        <div class="form-group"><label class="form-label">Campo *</label><select class="form-select" id="mp-campo">${(allCampos||[]).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label">Descripción</label><textarea class="form-textarea" id="mp-desc" rows="2" placeholder="Tipo de construcción, detalles..."></textarea></div>
+        <div style="border-top:1px solid var(--border);margin:.5rem 0 1rem;padding-top:1rem">
+          <div style="font-size:.8rem;font-weight:500;color:var(--text);margin-bottom:.6rem">Relevamiento del año</div>
+          <div class="form-group"><label class="form-label">Año *</label><select class="form-select" id="mp-anio" onchange="mpCargarAnio()">${anios.map(a=>`<option value="${a}">${a}</option>`).join('')}</select>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem">Cambiá el año para cargar un relevamiento nuevo o ver/corregir uno ya cargado.</div></div>
+          <div class="form-group"><label class="form-label">Estado de ocupación</label><select class="form-select" id="mp-estado" onchange="mpToggleOcupante()"><option value="habitado">Habitado</option><option value="desocupado">Desocupado</option><option value="abandonado">Abandonado</option></select></div>
+          <div class="form-group" id="mp-ocupante-wrap"><label class="form-label">Ocupante(s)</label><input class="form-input" id="mp-ocupante" placeholder="Nombre de quien vive ahí"></div>
+          <div class="form-group" style="margin-bottom:0"><label class="form-label">Notas del relevamiento</label><textarea class="form-textarea" id="mp-notas" rows="2" placeholder="Observaciones de ese año"></textarea></div>
+        </div>
+        <div id="mp-error" style="color:var(--danger);font-size:.8rem;margin-bottom:.5rem"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('modal-puesto').style.display='none'">Cancelar</button>
+          <button class="btn btn-accent" onclick="guardarPuesto()">Guardar</button>
+        </div>
+      </div>
+    </div>
+    <div id="modal-confirm-puesto" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;padding:1rem">
+      <div class="card" style="max-width:380px;width:100%">
+        <div class="card-title">Dar de baja</div>
+        <div style="font-size:.85rem;margin-bottom:1rem" id="mcp-text"></div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('modal-confirm-puesto').style.display='none'">Cancelar</button>
+          <button class="btn" style="background:var(--danger);color:#fff" onclick="confirmarBajaPuesto()">Dar de baja</button>
+        </div>
+      </div>
+    </div>`:''}`;
+}
+
+function abrirHistPuesto(id){
+  const p=(window._puestos||[]).find(x=>x.id===id);
+  const h=(window._histPorPuesto?.[id]||[]);
+  document.getElementById('mhp-title').textContent='Histórico — '+(p?.nombre||'');
+  document.getElementById('mhp-body').innerHTML=h.length?h.map(r=>{
+    const e=puestoEstado(r.habitantes);
+    const det=e.tipo==='habitado'&&r.habitantes?` — ${r.habitantes}`:'';
+    return`<div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;gap:.6rem;align-items:center"><strong style="min-width:42px">${r.anio}</strong><span class="badge ${e.cls}">${e.label}</span><span style="font-size:.82rem">${det.replace(' — ','')}</span></div>
+      ${r.notas?`<div style="font-size:.78rem;color:var(--muted);margin-top:.2rem;padding-left:42px">${r.notas}</div>`:''}
+    </div>`;
+  }).join(''):'<div style="color:var(--muted);font-size:.85rem">Sin registros.</div>';
+  document.getElementById('modal-hist-puesto').style.display='flex';
+}
+
+function mpToggleOcupante(){
+  const estado=document.getElementById('mp-estado').value;
+  document.getElementById('mp-ocupante-wrap').style.display=estado==='habitado'?'':'none';
+}
+// Carga en el formulario el relevamiento del año elegido (o lo deja en blanco si no existe)
+function mpCargarAnio(){
+  const id=document.getElementById('mp-id').value;
+  const anio=parseInt(document.getElementById('mp-anio').value,10);
+  const r=(window._histPorPuesto?.[id]||[]).find(x=>x.anio===anio);
+  const hab=r?.habitantes||'';
+  const e=puestoEstado(hab);
+  document.getElementById('mp-estado').value=e.tipo==='sindato'?'habitado':e.tipo;
+  document.getElementById('mp-ocupante').value=e.tipo==='habitado'?hab:'';
+  document.getElementById('mp-notas').value=r?.notas||'';
+  mpToggleOcupante();
+}
+function abrirModalPuesto(id){
+  document.getElementById('mp-error').textContent='';
+  const anioSel=document.getElementById('mp-anio');
+  if(id){
+    const p=(window._puestos||[]).find(x=>x.id===id);
+    if(!p)return;
+    document.getElementById('mp-title').textContent='Editar instalación';
+    document.getElementById('mp-id').value=p.id;
+    document.getElementById('mp-nombre').value=p.nombre||'';
+    document.getElementById('mp-campo').value=p.campo_id||'';
+    document.getElementById('mp-desc').value=p.descripcion||'';
+    // arranca mostrando el año más reciente cargado
+    const ultimo=(window._histPorPuesto?.[id]||[])[0];
+    anioSel.value=String(ultimo?.anio||new Date().getFullYear());
+    mpCargarAnio();
+  }else{
+    document.getElementById('mp-title').textContent='Nueva instalación';
+    document.getElementById('mp-id').value='';
+    document.getElementById('mp-nombre').value='';
+    document.getElementById('mp-campo').selectedIndex=0;
+    document.getElementById('mp-desc').value='';
+    anioSel.value=String(new Date().getFullYear());
+    document.getElementById('mp-estado').value='habitado';
+    document.getElementById('mp-ocupante').value='';
+    document.getElementById('mp-notas').value='';
+    mpToggleOcupante();
+  }
+  document.getElementById('modal-puesto').style.display='flex';
+}
+async function guardarPuesto(){
+  const err=document.getElementById('mp-error');
+  const nombre=document.getElementById('mp-nombre').value.trim();
+  const campo_id=document.getElementById('mp-campo').value;
+  const anio=parseInt(document.getElementById('mp-anio').value,10);
+  const estado=document.getElementById('mp-estado').value;
+  const ocupante=document.getElementById('mp-ocupante').value.trim();
+  const descripcion=document.getElementById('mp-desc').value.trim()||null;
+  const notas=document.getElementById('mp-notas').value.trim()||null;
+  if(!nombre){err.textContent='Poné un nombre.';return;}
+  if(!campo_id){err.textContent='Elegí un campo.';return;}
+  if(!anio){err.textContent='Elegí un año.';return;}
+  let habitantes=null;
+  if(estado==='desocupado')habitantes='Desocupado';
+  else if(estado==='abandonado')habitantes='Abandonado';
+  else habitantes=ocupante||null;
+  let id=document.getElementById('mp-id').value;
+  if(id){
+    const{error}=await sb.from('puestos').update({nombre,campo_id,descripcion}).eq('id',id);
+    if(error){err.textContent='Error al guardar: '+error.message;return;}
+  }else{
+    const{data,error}=await sb.from('puestos').insert({nombre,campo_id,descripcion,activo:true}).select('id').single();
+    if(error){err.textContent='Error al guardar: '+error.message;return;}
+    id=data.id;
+  }
+  const{error:eh}=await sb.from('puestos_historico').upsert({puesto_id:id,anio,habitantes,notas},{onConflict:'puesto_id,anio'});
+  if(eh){err.textContent='Se guardó la instalación pero falló el relevamiento: '+eh.message;return;}
+  document.getElementById('modal-puesto').style.display='none';
+  renderPuestos();
+}
+let _bajaPuestoId=null;
+function pedirBajaPuesto(id){
+  const p=(window._puestos||[]).find(x=>x.id===id);
+  _bajaPuestoId=id;
+  document.getElementById('mcp-text').textContent=`¿Seguro que querés dar de baja "${p?.nombre||''}"? No se borra: queda inactivo y se puede recuperar más adelante.`;
+  document.getElementById('modal-confirm-puesto').style.display='flex';
+}
+async function confirmarBajaPuesto(){
+  if(!_bajaPuestoId)return;
+  const{error}=await sb.from('puestos').update({activo:false}).eq('id',_bajaPuestoId);
+  document.getElementById('modal-confirm-puesto').style.display='none';
+  _bajaPuestoId=null;
+  if(error){alert('Error al dar de baja: '+error.message);return;}
+  renderPuestos();
 }
 
 // ── HISTÓRICOS ──
@@ -3417,7 +3603,7 @@ async function renderAdmin(){
       <button class="tab-btn" onclick="adminTab('campos',this)">Campos</button>
       <button class="tab-btn" onclick="adminTab('rodados',this)">Rodados</button>
       <button class="tab-btn" onclick="adminTab('medidores',this)">Medidores</button>
-      <button class="tab-btn" onclick="adminTab('puestos-admin',this)">Puestos</button>
+      <button class="tab-btn" onclick="adminTab('puestos-admin',this)">Instalaciones</button>
     </div>
     <div id="admin-panel"></div>`;
   document.getElementById('admin-panel').innerHTML=renderAdminUsuarios(profiles||[]);

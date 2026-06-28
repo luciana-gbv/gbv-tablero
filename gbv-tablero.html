@@ -1851,6 +1851,14 @@ function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo,idsQueEvaluo){
       if(estado==='aprobado'){badgeClass='badge-ok';badgeLabel='Aprobado';}
       else if(estado==='enviado'){badgeClass='badge-info';badgeLabel='Enviado';}
       else if(estado==='borrador'){badgeClass='badge-na';badgeLabel='Borrador';}
+      // Estado general (para las tarjetas que el directivo solo mira): el más avanzado entre los evaluadores reales
+      const rank={pendiente:0,borrador:1,enviado:2,aprobado:3};
+      let genEstado='pendiente';
+      evs.forEach(e=>{ if((rank[e.estado]??0)>(rank[genEstado]??0)) genEstado=e.estado; });
+      let genCls='badge-pend',genLabel='Pendiente';
+      if(genEstado==='aprobado'){genCls='badge-ok';genLabel='Aprobada';}
+      else if(genEstado==='enviado'){genCls='badge-info';genLabel='Enviada';}
+      else if(genEstado==='borrador'){genCls='badge-na';genLabel='En borrador';}
       const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
       return`<div class="puesto-card">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
@@ -1859,7 +1867,7 @@ function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo,idsQueEvaluo){
             <div style="font-size:.75rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''}</div>
             ${esLider?`<span class="badge badge-info" style="margin-top:4px;font-size:.68rem">Encargado/Responsable</span>`:''}
           </div>
-          ${yoEvaluo?`<span class="badge ${badgeClass}">${badgeLabel}</span>`:`<span class="badge badge-na" style="opacity:.7">Solo lectura</span>`}
+          ${yoEvaluo?`<span class="badge ${badgeClass}">${badgeLabel}</span>`:`<div style="text-align:right"><span class="badge ${genCls}">${genLabel}</span><div style="font-size:.62rem;color:var(--muted);margin-top:3px">solo lectura${evs.length>1?` · ${evs.length} evaluadores`:''}</div></div>`}
         </div>
         ${yoEvaluo&&miEval&&miEval.bono_calculado?`
           <div style="font-size:.78rem;margin-bottom:.5rem">
@@ -4163,10 +4171,23 @@ async function hacFetchPaginado(buildQuery){
 
 async function renderHacConsultar(){
   const el=document.getElementById('hac-content');
-  const historicoTodo=await hacFetchPaginado((f,t)=>sb.from('hacienda_historico').select('periodo,campo').range(f,t));
-  const periodos=[...new Set((historicoTodo||[]).map(p=>p.periodo))].sort().reverse();
+  el.innerHTML='<div class="loading">Cargando histórico…</div>';
+  let periodos, campos;
+  // Camino rápido: vistas de valores distintos (si existen en la base)
+  const [rp, rc] = await Promise.all([
+    sb.from('hacienda_periodos').select('periodo'),
+    sb.from('hacienda_campos').select('campo')
+  ]);
+  if(!rp.error && !rc.error && rp.data && rc.data){
+    periodos=[...new Set(rp.data.map(p=>p.periodo))].sort().reverse();
+    campos=[...new Set(rc.data.map(c=>c.campo))].sort();
+  }else{
+    // Fallback: escaneo paginado de toda la historia (más lento, pero seguro)
+    const historicoTodo=await hacFetchPaginado((f,t)=>sb.from('hacienda_historico').select('periodo,campo').range(f,t));
+    periodos=[...new Set((historicoTodo||[]).map(p=>p.periodo))].sort().reverse();
+    campos=[...new Set((historicoTodo||[]).map(c=>c.campo))].sort();
+  }
   _hacPeriodos=periodos;
-  const campos=[...new Set((historicoTodo||[]).map(c=>c.campo))].sort();
 
   el.innerHTML=`
     <div class="card" style="margin-bottom:1rem">

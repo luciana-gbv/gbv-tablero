@@ -1637,6 +1637,13 @@ function claveObjetivos(emp){
   return emp.puesto_codigo;
 }
 
+// Nadie se evalúa a sí mismo: detecta si un empleado es el propio usuario (match por nombre+apellido)
+function esMiPropioEmpleado(emp){
+  if(!emp||!currentProfile)return false;
+  return normalizarTexto(emp.nombre)===normalizarTexto(currentProfile.nombre)
+      && normalizarTexto(emp.apellido||'')===normalizarTexto(currentProfile.apellido||'');
+}
+
 // Calcular porcentaje actitudinal según tabla
 function calcPorcentajeActitudinal(puntaje, esLider){
   if(esLider){
@@ -1715,9 +1722,12 @@ async function renderRRHH(){
       .map(e=>e.id);
   }
   const idsEvaluables=new Set([...idsFijos,...idsAutomaticos]);
-  // Programador edita a todos (mismo failsafe que en abrirEvaluacion)
+  // Nadie se evalúa a sí mismo: sacar el propio registro de empleado de los evaluables
+  const miEmpleadoId=(todosEmpleados||[]).find(e=>esMiPropioEmpleado(e))?.id;
+  if(miEmpleadoId) idsEvaluables.delete(miEmpleadoId);
+  // Programador edita a todos (mismo failsafe que en abrirEvaluacion), menos a sí mismo
   const idsQueEvaluo = currentProfile.rol==='programador'
-    ? new Set((todosEmpleados||[]).map(e=>e.id))
+    ? new Set((todosEmpleados||[]).filter(e=>!esMiPropioEmpleado(e)).map(e=>e.id))
     : idsEvaluables;
 
   // La LISTA que se muestra: directivos ven a TODOS; el resto solo a los que evalúan.
@@ -2273,6 +2283,18 @@ async function abrirEvaluacion(empleadoId){
   const emp=(todosEmpleados||misEmpleados).find(e=>e.id===empleadoId);
   if(!emp) return;
 
+  // Nadie puede hacer su propia evaluación de desempeño
+  if(esMiPropioEmpleado(emp)){
+    const panel=document.getElementById('rrhh-panel');
+    panel.innerHTML=`
+      <button class="btn btn-sm" onclick="renderRRHH()" style="margin-bottom:1rem">← Volver</button>
+      <div class="card"><div class="locked">
+        <div style="font-size:2rem;margin-bottom:.75rem">🔒</div>
+        <div style="font-size:.85rem">No podés hacer tu propia evaluación de desempeño.</div>
+      </div></div>`;
+    return;
+  }
+
   // Verificar que el usuario actual sea evaluador de este empleado (o programador)
   const esProgramador=currentProfile.rol==='programador';
   if(!esProgramador){
@@ -2458,6 +2480,9 @@ function recalcularBono(){
 async function guardarEvaluacion(empleadoId, puesto, esLider, estado){
   const msgEl=document.getElementById('msg-eval');
   if(msgEl){msgEl.textContent='Guardando...';msgEl.className='form-hint';}
+  // Defensa: nadie guarda su propia evaluación
+  const empEval=(window._rrhhData?.todosEmpleados||[]).find(e=>e.id===empleadoId);
+  if(empEval&&esMiPropioEmpleado(empEval)){ if(msgEl){msgEl.textContent='No podés hacer tu propia evaluación de desempeño.';msgEl.className='msg-err';} return; }
   const{actitudinal,objetivos}=window._evalState||{};
   const sueldo=parseFloat(document.getElementById('eval-sueldo')?.value)||null;
   const notas=document.getElementById('eval-notas')?.value||'';

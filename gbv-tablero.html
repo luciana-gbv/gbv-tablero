@@ -2345,7 +2345,7 @@ async function abrirEvaluacion(empleadoId){
             </div>
           </div>`).join('')}
         <div style="margin-top:.75rem;font-size:.85rem;font-weight:500">
-          Puntaje actitudinal: <span id="puntaje-actitudinal">—</span> pts → <span id="pct-actitudinal" style="color:var(--accent)">—</span>% del bono actitudinal
+          Puntaje actitudinal: <span id="puntaje-actitudinal">—</span> pts → <span id="pct-actitudinal" style="color:var(--accent)">—</span>% ${objetivos.length>0?'del bono actitudinal':'del bono (este puesto no tiene objetivos)'}
         </div>
       </div>
 
@@ -2364,7 +2364,10 @@ async function abrirEvaluacion(empleadoId){
         <div style="margin-top:.75rem;font-size:.85rem;font-weight:500">
           Puntaje objetivos: <span id="puntaje-objetivos">—</span> pts → <span id="pct-objetivos" style="color:var(--accent)">—</span>% del bono objetivos
         </div>
-      </div>`:''}
+      </div>`:`
+      <div style="margin-bottom:1.5rem;padding:.85rem 1rem;background:var(--bg);border-radius:var(--radius);font-size:.82rem;color:var(--muted)">
+        Este puesto no tiene objetivos cuantitativos, así que la evaluación <strong style="color:var(--text)">actitudinal define el 100% del bono</strong>.
+      </div>`}
 
       <div style="background:var(--bg);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
         <div style="font-size:.85rem;font-weight:500;margin-bottom:.5rem">Bono estimado</div>
@@ -2423,8 +2426,11 @@ function recalcularBono(){
   const pAct=Object.values(actitudinal||{}).reduce((a,b)=>a+b,0);
   const completoAct=Object.keys(actitudinal||{}).length===condiciones.length;
   const pObj=Object.values(objetivos||{}).reduce((a,b)=>a+b,0);
-  const pctAct=calcPorcentajeActitudinal(pAct,esLider);
-  const pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  // Puestos sin tabla de objetivos: la actitudinal pasa a valer el 100% del bono (×2)
+  const sinObjetivos=!(OBJETIVOS_PUESTO[window._evalState?.puesto]||[]).length;
+  let pctAct=calcPorcentajeActitudinal(pAct,esLider);
+  let pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  if(sinObjetivos){ pctAct=pctAct*2; pctObj=0; }
   const elPA=document.getElementById('puntaje-actitudinal');
   const elPctA=document.getElementById('pct-actitudinal');
   const elPO=document.getElementById('puntaje-objetivos');
@@ -2435,9 +2441,12 @@ function recalcularBono(){
   if(elPO) elPO.textContent=Object.keys(objetivos||{}).length>0?pObj:'(incompleto)';
   if(elPctO) elPctO.textContent=Object.keys(objetivos||{}).length>0?pctObj:'—';
   if(elBono){
-    if(sueldo&&completoAct&&Object.keys(objetivos||{}).length>0){
+    const objOk = sinObjetivos || Object.keys(objetivos||{}).length>0;
+    if(sueldo&&completoAct&&objOk){
       const bono=calcBono(sueldo,pctAct,pctObj,esLider);
       elBono.textContent='$'+bono.toLocaleString('es-AR',{minimumFractionDigits:2});
+      elBono.style.fontSize='1.4rem';
+      elBono.style.color='var(--accent)';
     } else {
       elBono.textContent='Complete todos los campos para calcular';
       elBono.style.fontSize='.85rem';
@@ -2455,8 +2464,10 @@ async function guardarEvaluacion(empleadoId, puesto, esLider, estado){
   const condiciones=[...CONDICIONES_BASE,...(esLider?CONDICIONES_LIDERAZGO:[])];
   const pAct=Object.values(actitudinal||{}).reduce((a,b)=>a+b,0);
   const pObj=Object.values(objetivos||{}).reduce((a,b)=>a+b,0);
-  const pctAct=calcPorcentajeActitudinal(pAct,esLider);
-  const pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  const sinObjetivos=!(OBJETIVOS_PUESTO[window._evalState?.puesto]||[]).length;
+  let pctAct=calcPorcentajeActitudinal(pAct,esLider);
+  let pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  if(sinObjetivos){ pctAct=pctAct*2; pctObj=0; } // sin objetivos: actitudinal = 100% del bono
   const bono=sueldo?calcBono(sueldo,pctAct,pctObj,esLider):null;
   const periodo=window._rrhhData.periodo;
 

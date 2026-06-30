@@ -1637,11 +1637,20 @@ function claveObjetivos(emp){
   return emp.puesto_codigo;
 }
 
-// Nadie se evalúa a sí mismo: detecta si un empleado es el propio usuario (match por nombre+apellido)
+// Nadie se evalúa a sí mismo: detecta si un empleado es el propio usuario.
+// Prioriza el vínculo directo (empleados.user_id); si ese empleado no está vinculado, cae al nombre.
 function esMiPropioEmpleado(emp){
   if(!emp||!currentProfile)return false;
+  if(emp.user_id)return emp.user_id===currentUser.id;
   return normalizarTexto(emp.nombre)===normalizarTexto(currentProfile.nombre)
       && normalizarTexto(emp.apellido||'')===normalizarTexto(currentProfile.apellido||'');
+}
+// Devuelve el registro de empleado del usuario actual (por vínculo directo, o por nombre como respaldo)
+function miEmpleadoRecord(empleados){
+  if(!empleados||!currentProfile)return null;
+  return empleados.find(e=>e.user_id&&e.user_id===currentUser.id)
+      || empleados.find(e=>normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&normalizarTexto(e.apellido||'')===normalizarTexto(currentProfile.apellido||''))
+      || null;
 }
 
 // Calcular porcentaje actitudinal según tabla
@@ -1710,11 +1719,8 @@ async function renderRRHH(){
   // solo si cambia el Encargado, sin tocar la base.
   const PUESTOS_ENCARGADO=['encargado'];
   const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
-  const miEmpleadoComoEncargado=(todosEmpleados||[]).find(e=>
-    PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
-    normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
-    normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
-  );
+  const miEmp=miEmpleadoRecord(todosEmpleados);
+  const miEmpleadoComoEncargado=(miEmp&&PUESTOS_ENCARGADO.includes(miEmp.puesto_codigo))?miEmp:null;
   let idsAutomaticos=[];
   if(miEmpleadoComoEncargado){
     idsAutomaticos=(todosEmpleados||[])
@@ -2308,11 +2314,8 @@ async function abrirEvaluacion(empleadoId){
       const PUESTOS_CAMPO_AUTOMATICOS=['capataz','peon','puestero','tractorista'];
       if(PUESTOS_CAMPO_AUTOMATICOS.includes(emp.puesto_codigo)){
         const todos=todosEmpleados||misEmpleados||[];
-        const miEmpleadoComoEncargado=todos.find(e=>
-          PUESTOS_ENCARGADO.includes(e.puesto_codigo)&&
-          normalizarTexto(e.nombre)===normalizarTexto(currentProfile.nombre)&&
-          normalizarTexto(e.apellido)===normalizarTexto(currentProfile.apellido)
-        );
+        const miEmp=miEmpleadoRecord(todos);
+        const miEmpleadoComoEncargado=(miEmp&&PUESTOS_ENCARGADO.includes(miEmp.puesto_codigo))?miEmp:null;
         if(miEmpleadoComoEncargado&&miEmpleadoComoEncargado.unidad_negocio===emp.unidad_negocio){
           tieneAcceso=true;
         }

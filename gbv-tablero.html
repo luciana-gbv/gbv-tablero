@@ -2580,9 +2580,10 @@ async function renderInmuebles(){
     <div class="card" style="margin-bottom:1rem">
       <div class="card-title">Alertas activas</div>
       ${alrt.map(a=>`
-        <div class="alert ${a.tipo==='impago'?'alert-danger':a.tipo==='rescision'?'alert-warning':'alert-info'}" style="margin-bottom:.5rem">
+        <div class="alert ${a.tipo==='impago'?'alert-danger':a.tipo==='rescision'?'alert-warning':'alert-info'}" style="margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div><strong>${inm.find(i=>i.id===a.inmueble_id)?.direccion||'Inmueble'}</strong> — ${a.tipo==='impago'?'Incumplimiento de pago':a.tipo==='rescision'?'Rescisión anticipada':a.tipo==='daño'?'Daño a la propiedad':'Novedad'}: ${a.descripcion}
           <span style="font-size:.75rem;color:var(--muted);display:block;margin-top:2px">Reportado por ${(a.profiles?.nombre||'')+' '+(a.profiles?.apellido||'')} · ${new Date(a.fecha).toLocaleDateString('es-AR')}</span></div>
+          ${currentProfile.rol==='programador'?`<button onclick="eliminarAlertaInm('${a.id}')" title="Eliminar alerta" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:1.05rem;padding:0 2px;flex-shrink:0;line-height:1">✕</button>`:''}
         </div>`).join('')}
       ${porVencer.map(c=>`
         <div class="alert alert-warning" style="margin-bottom:.5rem">
@@ -3002,6 +3003,15 @@ async function guardarAlertaInm(){
     msgEl.textContent='✓ Alerta guardada correctamente';msgEl.className='msg-ok';
     setTimeout(()=>renderInmuebles(),1500);
   }
+}
+
+// Eliminar una alerta de inmueble (solo programador). Borrado definitivo, con confirmación.
+async function eliminarAlertaInm(id){
+  if(currentProfile.rol!=='programador')return;
+  if(!confirm('¿Eliminar esta alerta? Esta acción no se puede deshacer.'))return;
+  const{error}=await sb.from('alertas_inmuebles').delete().eq('id',id);
+  if(error){alert('No se pudo eliminar la alerta: '+error.message);return;}
+  renderInmuebles();
 }
 
 // ── PUESTOS ──

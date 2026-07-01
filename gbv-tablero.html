@@ -171,7 +171,28 @@ let allCampos=[],allUnidades=[],allIndicadores=[],misCampos=[];
 // Filtro de vencidos por responsable: veTodoIndicadores=true => sin filtro (ve todo);
 // si no, misIndicadoresResp = Set de indicador_id de los que la persona es responsable.
 let veTodoIndicadores=false, misIndicadoresResp=null;
+let indicadorUnidades={};   // indicador_id -> Set(unidad_negocio_id): alcance por indicador (para la pantalla de Carga)
+let veTodaCarga=false;      // true para quien ve/edita TODA la pantalla de Carga (programador + Federico)
+const VE_TODA_CARGA_IDS=['65108928-ac45-4478-a8fc-fac2230999c7']; // Federico McMahon (agregar más user_id acá si hace falta)
 function esMiIndicador(indId){ return veTodoIndicadores || (misIndicadoresResp && misIndicadoresResp.has(indId)); }
+// ── Pantalla de Carga: cada uno ve/edita solo lo suyo (Federico y programador ven todo) ──
+function esMiIndicadorCarga(indId){ return veTodaCarga || (misIndicadoresResp && misIndicadoresResp.has(indId)); }
+// Unidades que la persona puede seleccionar en una categoría (según sus indicadores y el alcance)
+function unidadesVisiblesCarga(cat){
+  const visibles=allIndicadores.filter(i=>i.categoria===cat && esMiIndicadorCarga(i.id));
+  const ids=new Set();
+  visibles.forEach(i=>{ const us=indicadorUnidades[i.id]; if(us) us.forEach(u=>ids.add(u)); });
+  let lista=allUnidades.filter(u=>ids.has(u.id));
+  if(currentProfile.rol==='encargado_campo'){
+    const misU=new Set(misCampos.map(c=>c.unidad_negocio_id));
+    lista=lista.filter(u=>misU.has(u.id));
+  }
+  return lista;
+}
+// Categorías que la persona puede ver en Carga (donde tiene algún indicador visible)
+function categoriasVisiblesCarga(){
+  return [...new Set(allIndicadores.filter(i=>esMiIndicadorCarga(i.id)).map(i=>i.categoria))];
+}
 let currentPermisos={};
 let selectedCampo=null,selectedCat=null;
 const ROL_LABELS={programador:'Programador',directorio:'Directorio',coo:'COO',operativo:'Operativo',encargado_campo:'Encargado de campo',hacienda:'Hacienda',directorio_lectura:'Directorio (solo lectura)'};
@@ -250,12 +271,15 @@ async function initApp(user){
   allCampos=campos||[];allUnidades=unidades||[];allIndicadores=indicadores||[];
   // ── Quién ve qué vencidos: los 4 roles de control ven todo; el resto solo lo suyo ──
   veTodoIndicadores=['programador','directorio','coo','directorio_lectura'].includes(currentProfile.rol);
-  if(veTodoIndicadores){
-    misIndicadoresResp=null;
-  }else{
-    const{data:misResp}=await sb.from('indicador_responsables').select('indicador_id').eq('user_id',user.id);
-    misIndicadoresResp=new Set((misResp||[]).map(r=>r.indicador_id));
-  }
+  // misIndicadoresResp se carga SIEMPRE (la pantalla de Carga lo usa para mostrar solo lo de cada uno)
+  const{data:misResp}=await sb.from('indicador_responsables').select('indicador_id').eq('user_id',user.id);
+  misIndicadoresResp=new Set((misResp||[]).map(r=>r.indicador_id));
+  // Alcance por indicador (indicador_id -> unidades) para la pantalla de Carga
+  const{data:alcanceRows}=await sb.from('indicador_unidades').select('indicador_id,unidad_negocio_id');
+  indicadorUnidades={};
+  (alcanceRows||[]).forEach(a=>{ (indicadorUnidades[a.indicador_id]=indicadorUnidades[a.indicador_id]||new Set()).add(a.unidad_negocio_id); });
+  // Quién ve/edita TODA la carga: programador + Federico
+  veTodaCarga = currentProfile.rol==='programador' || VE_TODA_CARGA_IDS.includes(user.id);
   const{data:permisos}=await sb.from('permisos_rol').select('modulo,puede_ver,puede_editar').eq('rol',currentProfile.rol);
   currentPermisos={};
   (permisos||[]).forEach(p=>{currentPermisos[p.modulo]={puede_ver:p.puede_ver,puede_editar:p.puede_editar};});
@@ -521,19 +545,21 @@ let selectedUnidad=null;
 
 async function renderCarga(){
   const main=document.getElementById('main-content');
-  const cats=[...new Set(allIndicadores.map(i=>i.categoria))];
+  const cats=categoriasVisiblesCarga();
+  // Si la persona no tiene ningún indicador para cargar
+  if(cats.length===0){
+    main.innerHTML=`
+      <div class="section-heading">Carga de datos</div>
+      <div class="card"><div style="text-align:center;padding:2.5rem;color:var(--muted)">
+        <div style="font-size:2rem;margin-bottom:.5rem">✓</div>
+        <div style="font-size:.9rem">No tenés indicadores asignados para cargar.</div>
+      </div></div>`;
+    return;
+  }
   if(!selectedCat||!cats.includes(selectedCat))selectedCat=cats[0];
 
-  // Cargar unidades permitidas para la categoría inicial
-  const{data:catU}=await sb.from('categoria_unidades').select('unidad_negocio_id').eq('categoria',selectedCat);
-  const permitidas=(catU||[]).map(cu=>cu.unidad_negocio_id);
-
-  // Unidades disponibles según rol y categoría
-  let misUnidades=allUnidades.filter(u=>permitidas.includes(u.id));
-  if(currentProfile.rol==='encargado_campo'){
-    const ids=[...new Set(misCampos.map(c=>c.unidad_negocio_id))];
-    misUnidades=misUnidades.filter(u=>ids.includes(u.id));
-  }
+  // Unidades disponibles: según los indicadores de la persona y su alcance
+  let misUnidades=unidadesVisiblesCarga(selectedCat);
   if(!selectedUnidad||!misUnidades.find(u=>u.id===selectedUnidad))
     selectedUnidad=misUnidades[0]?.id||null;
 
@@ -585,24 +611,25 @@ async function loadIndicatorsPanel(){
   const panel=document.getElementById('indicators-panel');
   if(!panel)return;
   panel.innerHTML='<div class="loading">Cargando...</div>';
-  const filtered=allIndicadores.filter(i=>i.categoria===selectedCat);
 
-  // Filtrar unidades permitidas para esta categoría
-  const{data:catUnidades}=await sb.from('categoria_unidades')
-    .select('unidad_negocio_id')
-    .eq('categoria',selectedCat);
-  const unidadesPermitidas=(catUnidades||[]).map(cu=>cu.unidad_negocio_id);
-
-  // Si la unidad seleccionada no está permitida, cambiar a la primera permitida
-  if(unidadesPermitidas.length>0&&!unidadesPermitidas.includes(selectedUnidad)){
-    selectedUnidad=unidadesPermitidas[0];
+  // Unidades visibles de la persona para esta categoría (según sus indicadores + alcance)
+  const misUnidades=unidadesVisiblesCarga(selectedCat);
+  // Si la unidad seleccionada no está entre las visibles, pasar a la primera
+  if(misUnidades.length>0 && !misUnidades.find(u=>u.id===selectedUnidad)){
+    selectedUnidad=misUnidades[0].id;
   }
 
-  // Actualizar sidebar para mostrar solo unidades permitidas
+  // Indicadores a mostrar: de esta categoría, cuyo alcance incluye la unidad elegida, y que le corresponden
+  const filtered=allIndicadores.filter(i=>
+    i.categoria===selectedCat &&
+    (indicadorUnidades[i.id] && indicadorUnidades[i.id].has(selectedUnidad)) &&
+    esMiIndicadorCarga(i.id)
+  );
+
+  // Actualizar la barra de unidades
   const navEl=document.getElementById('unidad-nav');
   if(navEl){
-    const unidadesFiltradas=allUnidades.filter(u=>unidadesPermitidas.includes(u.id));
-    navEl.innerHTML=unidadesFiltradas.map(u=>{
+    navEl.innerHTML=misUnidades.map(u=>{
       const campitos=allCampos.filter(c=>c.unidad_negocio_id===u.id);
       const has=campitos.reduce((a,c)=>a+(c.hectareas||0),0);
       return`<button class="sidebar-item ${u.id===selectedUnidad?'active':''}" onclick="selectUnidadNav('${u.id}',this)">
@@ -633,10 +660,7 @@ async function loadIndicatorsPanel(){
     rodadosBsAs=rb||[];
   }
 
-  if(filtered.length===0){panel.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay indicadores en esta categoría.</div></div>';return;}
-  if(selectedCat==='rrhh'&&!['programador','directorio','coo'].includes(currentProfile.rol)){
-    panel.innerHTML='<div class="card"><div class="locked"><div style="font-size:2rem;margin-bottom:.75rem">🔒</div><div style="font-size:.85rem">Esta sección es solo para el Directorio.</div></div></div>';return;
-  }
+  if(filtered.length===0){panel.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No tenés indicadores para cargar en esta categoría y unidad.</div></div>';return;}
   // Limpiar cache al cambiar categoría
   _varCache={};
   _allVarsLoaded=false;

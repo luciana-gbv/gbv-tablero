@@ -580,15 +580,24 @@ async function renderResumen(){
     <div class="card" style="margin-bottom:1rem">
       <div class="card-title">Últimas cargas</div>
       ${entries&&entries.length>0?`<div class="table-wrap"><table>
-        <thead><tr><th>Indicador</th><th>Categoría</th><th>Valor</th><th>Campo</th><th>Cargado por</th><th>Período</th></tr></thead>
-        <tbody>${entries.map(e=>`<tr>
+        <thead><tr><th>Indicador</th><th>Categoría</th><th>Valor</th><th>Estado</th><th>Campo</th><th>Cargado por</th><th>Período</th></tr></thead>
+        <tbody>${entries.map(e=>{
+          const reqAprob=CATS_APROBACION.includes(e.indicadores?.categoria);
+          let estadoBadge='<span style="color:var(--muted);font-size:.75rem">—</span>';
+          if(reqAprob){
+            if(e.estado==='aprobado')estadoBadge='<span class="badge" style="background:#E8F0EB;color:var(--accent)">✓ Aprobado</span>';
+            else if(e.estado==='rechazado')estadoBadge='<span class="badge" style="background:#F4E4E4;color:#8B1C1C">✗ Rechazado</span>';
+            else estadoBadge='<span class="badge" style="background:#FBF3D5;color:#7A5A00">⏳ Pendiente</span>';
+          }
+          return`<tr>
           <td>${e.indicadores?.nombre||'—'}</td>
           <td><span class="badge badge-na">${CAT_LABELS[e.indicadores?.categoria]||'—'}</span></td>
           <td><strong>${e.valor!==null?e.valor:'—'}</strong></td>
+          <td>${estadoBadge}</td>
           <td>${e.campos?.nombre||'—'}</td>
           <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
           <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
-        </tr>`).join('')}</tbody>
+        </tr>`;}).join('')}</tbody>
       </table></div>`:'<div style="text-align:center;padding:2rem;color:var(--muted);font-size:.85rem">Todavía no hay cargas registradas.</div>'}
     </div>
     <div class="card">
@@ -744,12 +753,16 @@ async function loadIndicatorsPanel(){
   // ── Opción B: ocultar los que ya se cargaron para su período actual (por indicador+unidad) ──
   const idsFiltered=filtered.map(i=>i.id);
   let cargadosSet=new Set();
+  _rechazadosMap={};
   if(idsFiltered.length>0 && selectedUnidad){
     const{data:entradasU}=await sb.from('entries')
-      .select('indicador_id,periodo_fecha')
+      .select('indicador_id,periodo_fecha,estado,motivo_rechazo')
       .eq('unidad_negocio_id', selectedUnidad)
       .in('indicador_id', idsFiltered);
-    (entradasU||[]).forEach(e=>cargadosSet.add(e.indicador_id+'_'+e.periodo_fecha));
+    (entradasU||[]).forEach(e=>{
+      if(e.estado==='rechazado'){ _rechazadosMap[e.indicador_id+'_'+e.periodo_fecha]=e.motivo_rechazo||''; }
+      else { cargadosSet.add(e.indicador_id+'_'+e.periodo_fecha); }
+    });
   }
   // Los de varias entradas por unidad (medidor/rodado/por campo) no se ocultan
   const esMultiEntrada=(ind)=> ind.por_campo || ['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
@@ -798,6 +811,7 @@ async function getVariables(indId){
 
 // Buscar valores ya cargados para el mismo período y clave compartida
 let _periodoValsCache={};
+let _rechazadosMap={};  // indicador_id+'_'+periodo -> motivo de rechazo (para avisar al responsable)
 
 async function preloadValoresPeriodo(periodo, unidadId){
   const cacheKey=periodo+'_'+unidadId;
@@ -1182,6 +1196,7 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
 
   return`<div class="ind-card" id="ind-card-${id}">
     <div class="ind-name">${ind.nombre}</div>
+    ${_rechazadosMap[id+'_'+periodoFijo]!==undefined?`<div style="background:#F4E4E4;color:#8B1C1C;border-radius:var(--radius);padding:.5rem .75rem;margin:.4rem 0;font-size:.8rem">✗ <strong>Rechazado por el COO.</strong> ${_rechazadosMap[id+'_'+periodoFijo]?'Motivo: '+_rechazadosMap[id+'_'+periodoFijo]:''} Corregí y volvé a cargar.</div>`:''}
     <div class="ind-meta">
       <span class="pill">${ind.periodicidad}</span>
       <span class="pill">${ind.unidad_medida}</span>

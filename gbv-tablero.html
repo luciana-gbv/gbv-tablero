@@ -455,6 +455,7 @@ async function mostrarAlertas(){
 const TAB_DEFS=[
   {id:'resumen',label:'Resumen',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
   {id:'carga',label:'Carga de datos',roles:['programador','coo','operativo','encargado_campo']},
+  {id:'aprobaciones',label:'Aprobaciones',roles:['programador','coo']},
   {id:'calendario',label:'Calendario',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
   {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo','directorio_lectura']},
   {id:'inmuebles',label:'Inmuebles',roles:['programador','directorio','coo','operativo','directorio_lectura']},
@@ -485,6 +486,7 @@ function renderTab(tab){
   document.getElementById('main-content').innerHTML='<div class="loading">Cargando...</div>';
   if(tab==='resumen')renderResumen();
   if(tab==='carga')renderCarga();
+  if(tab==='aprobaciones')renderAprobaciones();
   if(tab==='calendario')renderCalendario();
   if(tab==='bandeja')renderBandeja();
   if(tab==='inmuebles')renderInmuebles();
@@ -493,6 +495,70 @@ function renderTab(tab){
   if(tab==='historico')renderHistorico();
   if(tab==='hacienda')renderHacienda();
   if(tab==='admin')renderAdmin();
+}
+
+// ── APROBACIONES (COO / Joaquín aprueba indicadores de campo y ganadería) ──
+const CATS_APROBACION=['productivo_global','productivo_cria','productivo_recria','productivo_feedlot','alimenticio','sanitario','mejoramiento_genetico'];
+
+async function renderAprobaciones(){
+  const main=document.getElementById('main-content');
+  main.innerHTML='<div class="loading">Cargando...</div>';
+  const{data:profs}=await sb.from('profiles').select('id,nombre,apellido');
+  const nombreDe={}; (profs||[]).forEach(p=>nombreDe[p.id]=((p.nombre||'')+' '+(p.apellido||'')).trim()||'—');
+  const{data:pend}=await sb.from('entries')
+    .select('id,valor,valor_texto,periodo_fecha,created_at,user_id,estado,indicadores!inner(nombre,categoria,unidad_medida),unidades_negocio(nombre)')
+    .eq('estado','pendiente')
+    .in('indicadores.categoria',CATS_APROBACION)
+    .order('created_at',{ascending:true});
+  const lista=pend||[];
+
+  let html=`<div class="section-heading">Aprobaciones</div>
+    <div class="section-sub">Revisá y aprobá los indicadores de campo y ganadería cargados</div>`;
+  if(lista.length===0){
+    html+=`<div class="card"><div style="text-align:center;padding:2.5rem;color:var(--muted)"><div style="font-size:2rem;margin-bottom:.5rem">✓</div><div>No hay indicadores pendientes de aprobación.</div></div></div>`;
+    main.innerHTML=html; return;
+  }
+  html+=`<div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">${lista.length} pendiente${lista.length>1?'s':''} de aprobación</div>`;
+  html+=lista.map(e=>{
+    const val=e.valor!=null?Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):(e.valor_texto||'—');
+    const um=e.indicadores?.unidad_medida||'';
+    const uni=e.unidades_negocio?.nombre||'—';
+    const fecha=new Date(e.created_at).toLocaleDateString('es-AR');
+    return `<div class="card" id="aprob-card-${e.id}" style="margin-bottom:.6rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:600">${e.indicadores?.nombre||'—'}</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:.15rem">${uni} · período ${e.periodo_fecha} · cargó ${nombreDe[e.user_id]||'—'} el ${fecha}</div>
+        </div>
+        <div style="font-size:1.3rem;font-weight:700;color:var(--accent);white-space:nowrap">${val} <span style="font-size:.7rem;color:var(--muted);font-weight:400">${um}</span></div>
+      </div>
+      <div id="aprob-msg-${e.id}" style="font-size:.8rem;margin-top:.4rem"></div>
+      <div style="display:flex;gap:.5rem;margin-top:.6rem">
+        <button class="btn btn-accent btn-sm" onclick="aprobarEntry('${e.id}')">✓ Aprobar</button>
+        <button class="btn btn-sm" style="background:#F4E4E4;color:#8B1C1C" onclick="rechazarEntry('${e.id}')">✗ Rechazar</button>
+      </div>
+    </div>`;
+  }).join('');
+  main.innerHTML=html;
+}
+
+async function aprobarEntry(id){
+  const msg=document.getElementById('aprob-msg-'+id);
+  const{error}=await sb.from('entries').update({estado:'aprobado',aprobado_por:currentUser.id,aprobado_en:new Date().toISOString(),motivo_rechazo:null}).eq('id',id);
+  if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
+  const card=document.getElementById('aprob-card-'+id);
+  if(card){card.style.transition='opacity .3s';card.style.opacity='0';setTimeout(()=>card.remove(),300);}
+}
+
+async function rechazarEntry(id){
+  const motivo=prompt('Motivo del rechazo (obligatorio):');
+  if(motivo===null) return;
+  if(!motivo.trim()){alert('Tenés que escribir un motivo para rechazar.');return;}
+  const msg=document.getElementById('aprob-msg-'+id);
+  const{error}=await sb.from('entries').update({estado:'rechazado',aprobado_por:currentUser.id,aprobado_en:new Date().toISOString(),motivo_rechazo:motivo.trim()}).eq('id',id);
+  if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
+  const card=document.getElementById('aprob-card-'+id);
+  if(card){card.style.transition='opacity .3s';card.style.opacity='0';setTimeout(()=>card.remove(),300);}
 }
 
 // ── RESUMEN ──

@@ -559,6 +559,58 @@ async function rechazarEntry(id){
   if(card){card.style.transition='opacity .3s';card.style.opacity='0';setTimeout(()=>card.remove(),300);}
 }
 
+// ── PARA CORREGIR (cada persona ve sus indicadores rechazados) ──
+async function renderParaCorregir(targetId){
+  const cont=document.getElementById(targetId||'main-content');
+  if(!cont)return;
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  const{data:rech}=await sb.from('entries')
+    .select('id,valor,valor_texto,periodo_fecha,motivo_rechazo,indicador_id,unidad_negocio_id,indicadores(nombre,categoria,unidad_medida),unidades_negocio(nombre)')
+    .eq('estado','rechazado').eq('user_id',currentUser.id)
+    .order('aprobado_en',{ascending:false});
+  const lista=rech||[];
+  let html=`<div class="section-sub">El COO rechazó estas cargas. Corregilas y volvé a enviarlas.</div>`;
+  if(lista.length===0){
+    html+=`<div class="card"><div style="text-align:center;padding:2.5rem;color:var(--muted)"><div style="font-size:2rem;margin-bottom:.5rem">✓</div><div>No tenés nada para corregir. ¡Todo en orden!</div></div></div>`;
+    cont.innerHTML=html; return;
+  }
+  html+=lista.map(e=>{
+    const val=e.valor!=null?Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):(e.valor_texto||'—');
+    const um=e.indicadores?.unidad_medida||'';
+    const uni=e.unidades_negocio?.nombre||'—';
+    const cat=e.indicadores?.categoria||'';
+    return `<div class="card" style="margin-bottom:.6rem;border:1px solid #E8B4B4">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:600">${e.indicadores?.nombre||'—'}</div>
+          <div style="display:flex;align-items:center;gap:.5rem;margin-top:.35rem">
+            <span class="badge" style="background:#E6F1FB;color:#0C447C">📍 ${uni}</span>
+            <span style="color:var(--muted);font-size:.75rem">período ${e.periodo_fecha}</span>
+          </div>
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <div style="font-size:.68rem;color:var(--muted)">valor rechazado</div>
+          <div style="font-size:1.2rem;font-weight:700">${val} <span style="font-size:.7rem;color:var(--muted);font-weight:400">${um}</span></div>
+        </div>
+      </div>
+      <div style="background:#F4E4E4;color:#8B1C1C;border-radius:var(--radius);padding:.5rem .75rem;margin-top:.6rem;font-size:.8rem">
+        <strong>Motivo:</strong> ${e.motivo_rechazo||'(sin motivo)'}
+      </div>
+      <div style="margin-top:.6rem">
+        <button class="btn btn-accent btn-sm" onclick="irACorregir('${cat}','${e.unidad_negocio_id}')">✏️ Corregir y volver a cargar</button>
+      </div>
+    </div>`;
+  }).join('');
+  cont.innerHTML=html;
+}
+
+function irACorregir(cat, unidadId){
+  selectedCat=cat;
+  selectedUnidad=unidadId;
+  cargaSubTab='cargar';
+  renderCarga();
+}
+
 // ── RESUMEN ──
 async function renderResumen(){
   const{data:entries}=await sb.from('entries')
@@ -622,15 +674,34 @@ function cargaTab(name){ cargaSubTab=name; renderCarga(); }
 async function renderCarga(){
   const main=document.getElementById('main-content');
   const puedeAprobar=['programador','coo'].includes(currentProfile.rol);
-  const subtabs = puedeAprobar ? `<div class="tab-row" style="margin-bottom:1rem">
-      <button class="tab-btn ${cargaSubTab==='aprobar'?'':'active'}" onclick="cargaTab('cargar')">Cargar datos</button>
-      <button class="tab-btn ${cargaSubTab==='aprobar'?'active':''}" onclick="cargaTab('aprobar')">Aprobaciones</button>
+  // Contar mis rechazados (para la sub-pestaña "Para corregir")
+  let nRech=0;
+  try{
+    const{count}=await sb.from('entries').select('id',{count:'exact',head:true}).eq('estado','rechazado').eq('user_id',currentUser.id);
+    nRech=count||0;
+  }catch(e){}
+  // Si la sub-pestaña activa ya no aplica, volver a "cargar"
+  if(cargaSubTab==='aprobar' && !puedeAprobar) cargaSubTab='cargar';
+  if(cargaSubTab==='corregir' && nRech===0) cargaSubTab='cargar';
+
+  const mostrarSubtabs = puedeAprobar || nRech>0;
+  const subtabs = mostrarSubtabs ? `<div class="tab-row" style="margin-bottom:1rem">
+      <button class="tab-btn ${cargaSubTab==='cargar'?'active':''}" onclick="cargaTab('cargar')">Cargar datos</button>
+      ${nRech>0?`<button class="tab-btn ${cargaSubTab==='corregir'?'active':''}" onclick="cargaTab('corregir')" style="color:#8B1C1C">⚠ Para corregir (${nRech})</button>`:''}
+      ${puedeAprobar?`<button class="tab-btn ${cargaSubTab==='aprobar'?'active':''}" onclick="cargaTab('aprobar')">Aprobaciones</button>`:''}
     </div>` : '';
 
   // Sub-pestaña Aprobaciones (solo COO / programador)
   if(puedeAprobar && cargaSubTab==='aprobar'){
     main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="aprob-body"><div class="loading">Cargando...</div></div>`;
     renderAprobaciones('aprob-body');
+    return;
+  }
+
+  // Sub-pestaña Para corregir (rechazados propios)
+  if(cargaSubTab==='corregir'){
+    main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="corregir-body"><div class="loading">Cargando...</div></div>`;
+    renderParaCorregir('corregir-body');
     return;
   }
 
@@ -1181,12 +1252,13 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
       inputHtml=`
         <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
           ${inputVars.map(v=>{
+            const estaRechazado=_rechazadosMap[id+'_'+periodoFijo]!==undefined;
             const preval=preCargados[id+'_'+v.clave];
-            const bloqueado=preval!==undefined;
+            const bloqueado=!estaRechazado && preval!==undefined;
             // Pre-llenar hectáreas automáticamente desde la unidad de negocio
             const esHectareas=v.clave==='hectareas_campo';
             const valorHa=esHectareas?hasTotal:null;
-            const valorFinal=bloqueado?preval:esHectareas&&valorHa?valorHa:'';
+            const valorFinal=bloqueado?preval:(estaRechazado&&preval!==undefined?preval:(esHectareas&&valorHa?valorHa:''));
             const estaBloqueado=bloqueado||(esHectareas&&valorHa>0);
             return`<div class="form-group">
               <label class="form-label">${v.nombre} ${v.unidad?`<span style="color:var(--muted);font-weight:400">(${v.unidad})</span>`:''}

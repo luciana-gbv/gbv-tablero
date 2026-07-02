@@ -455,7 +455,6 @@ async function mostrarAlertas(){
 const TAB_DEFS=[
   {id:'resumen',label:'Resumen',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
   {id:'carga',label:'Carga de datos',roles:['programador','coo','operativo','encargado_campo']},
-  {id:'aprobaciones',label:'Aprobaciones',roles:['programador','coo']},
   {id:'calendario',label:'Calendario',roles:['programador','directorio','coo','operativo','encargado_campo','directorio_lectura']},
   {id:'bandeja',label:'Bandeja de entrada',roles:['programador','directorio','coo','directorio_lectura']},
   {id:'inmuebles',label:'Inmuebles',roles:['programador','directorio','coo','operativo','directorio_lectura']},
@@ -486,7 +485,6 @@ function renderTab(tab){
   document.getElementById('main-content').innerHTML='<div class="loading">Cargando...</div>';
   if(tab==='resumen')renderResumen();
   if(tab==='carga')renderCarga();
-  if(tab==='aprobaciones')renderAprobaciones();
   if(tab==='calendario')renderCalendario();
   if(tab==='bandeja')renderBandeja();
   if(tab==='inmuebles')renderInmuebles();
@@ -500,9 +498,10 @@ function renderTab(tab){
 // ── APROBACIONES (COO / Joaquín aprueba indicadores de campo y ganadería) ──
 const CATS_APROBACION=['productivo_global','productivo_cria','productivo_recria','productivo_feedlot','alimenticio','sanitario','mejoramiento_genetico'];
 
-async function renderAprobaciones(){
-  const main=document.getElementById('main-content');
-  main.innerHTML='<div class="loading">Cargando...</div>';
+async function renderAprobaciones(targetId){
+  const cont=document.getElementById(targetId||'main-content');
+  if(!cont)return;
+  cont.innerHTML='<div class="loading">Cargando...</div>';
   const{data:profs}=await sb.from('profiles').select('id,nombre,apellido');
   const nombreDe={}; (profs||[]).forEach(p=>nombreDe[p.id]=((p.nombre||'')+' '+(p.apellido||'')).trim()||'—');
   const{data:pend}=await sb.from('entries')
@@ -512,11 +511,10 @@ async function renderAprobaciones(){
     .order('created_at',{ascending:true});
   const lista=pend||[];
 
-  let html=`<div class="section-heading">Aprobaciones</div>
-    <div class="section-sub">Revisá y aprobá los indicadores de campo y ganadería cargados</div>`;
+  let html=`<div class="section-sub">Revisá y aprobá los indicadores de campo y ganadería cargados</div>`;
   if(lista.length===0){
     html+=`<div class="card"><div style="text-align:center;padding:2.5rem;color:var(--muted)"><div style="font-size:2rem;margin-bottom:.5rem">✓</div><div>No hay indicadores pendientes de aprobación.</div></div></div>`;
-    main.innerHTML=html; return;
+    cont.innerHTML=html; return;
   }
   html+=`<div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">${lista.length} pendiente${lista.length>1?'s':''} de aprobación</div>`;
   html+=lista.map(e=>{
@@ -539,7 +537,7 @@ async function renderAprobaciones(){
       </div>
     </div>`;
   }).join('');
-  main.innerHTML=html;
+  cont.innerHTML=html;
 }
 
 async function aprobarEntry(id){
@@ -617,14 +615,30 @@ async function renderResumen(){
 
 // ── CARGA ──
 let selectedUnidad=null;
+let cargaSubTab='cargar';   // 'cargar' | 'aprobar' (sub-pestaña dentro de Carga de datos)
+
+function cargaTab(name){ cargaSubTab=name; renderCarga(); }
 
 async function renderCarga(){
   const main=document.getElementById('main-content');
+  const puedeAprobar=['programador','coo'].includes(currentProfile.rol);
+  const subtabs = puedeAprobar ? `<div class="tab-row" style="margin-bottom:1rem">
+      <button class="tab-btn ${cargaSubTab==='aprobar'?'':'active'}" onclick="cargaTab('cargar')">Cargar datos</button>
+      <button class="tab-btn ${cargaSubTab==='aprobar'?'active':''}" onclick="cargaTab('aprobar')">Aprobaciones</button>
+    </div>` : '';
+
+  // Sub-pestaña Aprobaciones (solo COO / programador)
+  if(puedeAprobar && cargaSubTab==='aprobar'){
+    main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="aprob-body"><div class="loading">Cargando...</div></div>`;
+    renderAprobaciones('aprob-body');
+    return;
+  }
+
   const cats=categoriasVisiblesCarga();
   // Si la persona no tiene ningún indicador para cargar
   if(cats.length===0){
     main.innerHTML=`
-      <div class="section-heading">Carga de datos</div>
+      <div class="section-heading">Carga de datos</div>${subtabs}
       <div class="card"><div style="text-align:center;padding:2.5rem;color:var(--muted)">
         <div style="font-size:2rem;margin-bottom:.5rem">✓</div>
         <div style="font-size:.9rem">No tenés indicadores asignados para cargar.</div>
@@ -639,7 +653,7 @@ async function renderCarga(){
     selectedUnidad=misUnidades[0]?.id||null;
 
   main.innerHTML=`
-    <div class="section-heading">Carga de datos</div>
+    <div class="section-heading">Carga de datos</div>${subtabs}
     <div class="section-sub">Completá los indicadores que te corresponden</div>
     <div class="two-col">
       <div>

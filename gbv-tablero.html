@@ -959,9 +959,16 @@ async function loadIndicatorsPanel(){
       else { cargadosSet.add(e.indicador_id+'_'+e.periodo_fecha); }
     });
   }
-  // Los de varias entradas por unidad (medidor/rodado/por campo) no se ocultan
-  const esMultiEntrada=(ind)=> ind.por_campo || ['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
-  const estaCargado=(ind)=> !esMultiEntrada(ind) && cargadosSet.has(ind.id+'_'+getPeriodoFijo(ind));
+  // Consumos de luz / Kilometraje: se ocultan cuando TODOS sus medidores/rodados están cargados
+  const listaRodTodos = rodados.length>0?rodados:rodadosBsAs;
+  const luzCompleto = medidores.length>0 && medidores.every(m=>m._cargado);
+  const kmCompleto = listaRodTodos.length>0 && listaRodTodos.every(r=>r._cargado);
+  const estaCargado=(ind)=>{
+    if(ind.nombre==='Consumos de luz por medidor') return luzCompleto;
+    if(ind.nombre==='Kilometraje por camioneta') return kmCompleto;
+    if(ind.por_campo) return false; // por campo: no se ocultan por ahora
+    return cargadosSet.has(ind.id+'_'+getPeriodoFijo(ind));
+  };
   const pendientes=filtered.filter(i=>!estaCargado(i));
   const yaCargados=filtered.filter(i=>estaCargado(i));
 
@@ -1550,7 +1557,19 @@ async function guardarMedidor(indId,medidorId,unidadId,periodoFijo){
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
   await sb.from('consumo_medidores').insert({entry_id:entry.id,medidor_id:medidorId,kwh});
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
-  if(inp)inp.value='';setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  // Poner el medidor en verde al instante
+  if(inp){inp.readOnly=true;inp.style.background='#F4FAF6';inp.style.borderColor='#A8D5B5';}
+  const cardM=inp?inp.closest('.sub-entry-card'):null;
+  if(cardM){
+    cardM.style.borderColor='#A8D5B5';cardM.style.background='#F4FAF6';
+    const btn=cardM.querySelector('button'); if(btn) btn.remove();
+    const upl=cardM.querySelector('.upload-zone'); if(upl) upl.remove();
+    const title=cardM.querySelector('.sub-entry-title');
+    if(title && !title.querySelector('.chk-cargado')) title.insertAdjacentHTML('beforeend',' <span class="chk-cargado" style="color:var(--success);font-size:.72rem;font-weight:600">✓ cargado</span>');
+  }
+  // Si ya no quedan medidores por cargar en este indicador, se completó → mandarlo abajo
+  const indCardEl=document.getElementById('ind-card-'+indId);
+  if(indCardEl && indCardEl.querySelectorAll('button').length===0){ setTimeout(()=>loadIndicatorsPanel(),700); }
 }
 
 async function guardarKm(indId,rodadoId,unidadId,periodoFijo){
@@ -1562,7 +1581,18 @@ async function guardarKm(indId,rodadoId,unidadId,periodoFijo){
   if(e1){if(msgEl){msgEl.textContent='Error: '+e1.message;msgEl.className='msg-err';}return;}
   await sb.from('km_rodados').insert({entry_id:entry.id,rodado_id:rodadoId,km});
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
-  if(inp)inp.value='';setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  // Poner el rodado en verde al instante
+  if(inp){inp.readOnly=true;inp.style.background='#F4FAF6';inp.style.borderColor='#A8D5B5';}
+  const cardR=inp?inp.closest('.sub-entry-card'):null;
+  if(cardR){
+    cardR.style.borderColor='#A8D5B5';cardR.style.background='#F4FAF6';
+    const btn=cardR.querySelector('button'); if(btn) btn.remove();
+    const upl=cardR.querySelector('.upload-zone'); if(upl) upl.remove();
+    const title=cardR.querySelector('.sub-entry-title');
+    if(title && !title.querySelector('.chk-cargado')) title.insertAdjacentHTML('beforeend',' <span class="chk-cargado" style="color:var(--success);font-size:.72rem;font-weight:600">✓ cargado</span>');
+  }
+  const indCardEl=document.getElementById('ind-card-'+indId);
+  if(indCardEl && indCardEl.querySelectorAll('button').length===0){ setTimeout(()=>loadIndicatorsPanel(),700); }
 }
 
 // ── BANDEJA DE ENTRADA ──

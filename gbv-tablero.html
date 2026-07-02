@@ -611,6 +611,83 @@ function irACorregir(cat, unidadId){
   renderCarga();
 }
 
+// ── TENENCIA DE CAMPOS (Federico carga propias/arrendadas/aparcería; desperdicio se autocalcula) ──
+let tenenciaAnio=new Date().getFullYear();
+function setTenenciaAnio(v){ tenenciaAnio=parseInt(v); renderTenencia('tenencia-body'); }
+
+async function renderTenencia(targetId){
+  const cont=document.getElementById(targetId||'main-content');
+  if(!cont)return;
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  const{data:campos}=await sb.from('campos').select('id,nombre,hectareas,unidad_negocio_id').eq('activo',true).order('nombre');
+  const{data:ten}=await sb.from('tenencia_campos').select('*').eq('anio',tenenciaAnio);
+  const tenMap={}; (ten||[]).forEach(t=>tenMap[t.campo_id]=t);
+  const unidadNombre={}; allUnidades.forEach(u=>unidadNombre[u.id]=u.nombre);
+  const porUnidad={};
+  (campos||[]).forEach(c=>{ (porUnidad[c.unidad_negocio_id]=porUnidad[c.unidad_negocio_id]||[]).push(c); });
+
+  const anioActual=new Date().getFullYear();
+  const anios=[anioActual-2,anioActual-1,anioActual,anioActual+1];
+  let html=`<div class="section-sub">Cargá las hectáreas por tipo de tenencia. El desperdicio se calcula solo (superficie total del campo − los tres tipos).</div>
+    <div class="form-group" style="max-width:200px;margin-bottom:1rem">
+      <label class="form-label">Año</label>
+      <select class="form-input" onchange="setTenenciaAnio(this.value)">
+        ${anios.map(a=>`<option value="${a}" ${a===tenenciaAnio?'selected':''}>${a}</option>`).join('')}
+      </select>
+    </div>`;
+
+  Object.keys(porUnidad).forEach(uid=>{
+    html+=`<div class="card" style="margin-bottom:1rem"><div class="card-title">${unidadNombre[uid]||'—'}</div>`;
+    porUnidad[uid].forEach(c=>{
+      const t=tenMap[c.id]||{};
+      const sinTotal=c.hectareas==null;
+      html+=`<div style="border-top:1px solid var(--border);padding:.75rem 0">
+        <div style="font-weight:600;margin-bottom:.4rem">${c.nombre} ${sinTotal?'<span style="color:#8B1C1C;font-size:.72rem">⚠ falta cargar la superficie total</span>':`<span style="color:var(--muted);font-size:.75rem;font-weight:400">total ${Number(c.hectareas).toLocaleString('es-AR')} ha</span>`}</div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Propias (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-prop-${c.id}" value="${t.ha_propias??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Arrendadas (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-arr-${c.id}" value="${t.ha_arrendadas??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Aparcería (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-apar-${c.id}" value="${t.ha_aparceria??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div style="font-size:.8rem;padding-bottom:.5rem"><span style="color:var(--muted)">Desperdicio:</span> <strong id="ten-desp-${c.id}">—</strong></div>
+          <button class="btn btn-accent btn-sm" style="margin-bottom:.35rem" onclick="guardarTenencia('${c.id}',${c.hectareas??'null'})">Guardar</button>
+        </div>
+        <div id="ten-msg-${c.id}" style="font-size:.78rem;margin-top:.3rem"></div>
+      </div>`;
+    });
+    html+=`</div>`;
+  });
+  cont.innerHTML=html;
+  (campos||[]).forEach(c=>{ if(c.hectareas!=null) calcDesp(c.id, c.hectareas); });
+}
+
+function calcDesp(campoId, hectareas){
+  const el=document.getElementById('ten-desp-'+campoId);
+  if(!el)return;
+  const p=parseFloat(document.getElementById('ten-prop-'+campoId)?.value)||0;
+  const a=parseFloat(document.getElementById('ten-arr-'+campoId)?.value)||0;
+  const ap=parseFloat(document.getElementById('ten-apar-'+campoId)?.value)||0;
+  if(hectareas==null||isNaN(hectareas)){ el.textContent='(falta total)'; el.style.color='#8B1C1C'; return; }
+  const desp=hectareas-(p+a+ap);
+  el.textContent=desp.toLocaleString('es-AR',{maximumFractionDigits:2})+' ha';
+  el.style.color = desp<0 ? '#8B1C1C' : 'var(--text)';
+  const msg=document.getElementById('ten-msg-'+campoId);
+  if(msg){ msg.textContent = desp<0 ? '⚠ Los tipos superan la superficie total del campo. Revisá los números.' : ''; msg.className = desp<0?'msg-err':''; }
+}
+
+async function guardarTenencia(campoId, hectareas){
+  const p=parseFloat(document.getElementById('ten-prop-'+campoId)?.value)||0;
+  const a=parseFloat(document.getElementById('ten-arr-'+campoId)?.value)||0;
+  const ap=parseFloat(document.getElementById('ten-apar-'+campoId)?.value)||0;
+  const msg=document.getElementById('ten-msg-'+campoId);
+  if(hectareas!=null && !isNaN(hectareas) && (p+a+ap)>hectareas){
+    if(msg){msg.textContent='⚠ Los tipos superan la superficie total. Corregí antes de guardar.';msg.className='msg-err';}
+    return;
+  }
+  const desp=(hectareas!=null&&!isNaN(hectareas))?hectareas-(p+a+ap):0;
+  const{error}=await sb.from('tenencia_campos').upsert({campo_id:campoId,anio:tenenciaAnio,ha_propias:p,ha_arrendadas:a,ha_aparceria:ap,ha_desperdicio:desp,updated_at:new Date().toISOString()},{onConflict:'campo_id,anio'});
+  if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
+  if(msg){msg.textContent='✓ Guardado';msg.className='msg-ok';setTimeout(()=>{if(msg)msg.textContent='';},2500);}
+}
+
 // ── RESUMEN ──
 async function renderResumen(){
   const{data:entries}=await sb.from('entries')
@@ -643,7 +720,7 @@ async function renderResumen(){
           <td>${e.indicadores?.nombre||'—'}</td>
           <td><span class="badge badge-na">${CAT_LABELS[e.indicadores?.categoria]||'—'}</span></td>
           <td><strong>${e.valor!==null?e.valor:'—'}</strong></td>
-          <td>${estadoBadge}</td>
+          <td>${estadoBadge}${e.visto_por&&e.visto_por.length>0?'<div style="font-size:.66rem;color:var(--accent);margin-top:.2rem">👁 Visto por dirección</div>':''}</td>
           <td>${e.campos?.nombre||'—'}</td>
           <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
           <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
@@ -674,6 +751,7 @@ function cargaTab(name){ cargaSubTab=name; renderCarga(); }
 async function renderCarga(){
   const main=document.getElementById('main-content');
   const puedeAprobar=['programador','coo'].includes(currentProfile.rol);
+  const puedeTenencia = currentProfile.rol==='programador' || currentProfile.rol==='coo' || VE_TODA_CARGA_IDS.includes(currentUser.id);
   // Contar mis rechazados (para la sub-pestaña "Para corregir")
   let nRech=0;
   try{
@@ -683,11 +761,13 @@ async function renderCarga(){
   // Si la sub-pestaña activa ya no aplica, volver a "cargar"
   if(cargaSubTab==='aprobar' && !puedeAprobar) cargaSubTab='cargar';
   if(cargaSubTab==='corregir' && nRech===0) cargaSubTab='cargar';
+  if(cargaSubTab==='tenencia' && !puedeTenencia) cargaSubTab='cargar';
 
-  const mostrarSubtabs = puedeAprobar || nRech>0;
+  const mostrarSubtabs = puedeAprobar || puedeTenencia || nRech>0;
   const subtabs = mostrarSubtabs ? `<div class="tab-row" style="margin-bottom:1rem">
       <button class="tab-btn ${cargaSubTab==='cargar'?'active':''}" onclick="cargaTab('cargar')">Cargar datos</button>
       ${nRech>0?`<button class="tab-btn ${cargaSubTab==='corregir'?'active':''}" onclick="cargaTab('corregir')" style="color:#8B1C1C">⚠ Para corregir (${nRech})</button>`:''}
+      ${puedeTenencia?`<button class="tab-btn ${cargaSubTab==='tenencia'?'active':''}" onclick="cargaTab('tenencia')">Tenencia de campos</button>`:''}
       ${puedeAprobar?`<button class="tab-btn ${cargaSubTab==='aprobar'?'active':''}" onclick="cargaTab('aprobar')">Aprobaciones</button>`:''}
     </div>` : '';
 
@@ -695,6 +775,13 @@ async function renderCarga(){
   if(puedeAprobar && cargaSubTab==='aprobar'){
     main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="aprob-body"><div class="loading">Cargando...</div></div>`;
     renderAprobaciones('aprob-body');
+    return;
+  }
+
+  // Sub-pestaña Tenencia de campos (Federico / admins)
+  if(puedeTenencia && cargaSubTab==='tenencia'){
+    main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="tenencia-body"><div class="loading">Cargando...</div></div>`;
+    renderTenencia('tenencia-body');
     return;
   }
 
@@ -818,6 +905,29 @@ async function loadIndicatorsPanel(){
   if(['operativo','programador'].includes(currentProfile.rol)){
     const{data:rb}=await sb.from('rodados').select('*').is('campo_id',null).eq('activo',true);
     rodadosBsAs=rb||[];
+  }
+
+  // Marcar medidores y rodados que YA se cargaron en el período (para pintarlos en verde)
+  const indLuz=allIndicadores.find(i=>i.nombre==='Consumos de luz por medidor');
+  const indKm=allIndicadores.find(i=>i.nombre==='Kilometraje por camioneta');
+  if(indLuz && medidores.length>0){
+    const perLuz=getPeriodoFijo(indLuz);
+    const{data:cm}=await sb.from('consumo_medidores')
+      .select('medidor_id,kwh,entries!inner(periodo_fecha,unidad_negocio_id)')
+      .eq('entries.periodo_fecha',perLuz).eq('entries.unidad_negocio_id',selectedUnidad);
+    const mapM={}; (cm||[]).forEach(x=>{mapM[x.medidor_id]=x.kwh;});
+    medidores.forEach(m=>{ if(mapM[m.id]!==undefined){ m._cargado=true; m._valor=mapM[m.id]; } });
+  }
+  if(indKm){
+    const perKm=getPeriodoFijo(indKm);
+    const listaR=rodados.length>0?rodados:rodadosBsAs;
+    if(listaR.length>0){
+      const{data:kmR}=await sb.from('km_rodados')
+        .select('rodado_id,km,entries!inner(periodo_fecha,unidad_negocio_id)')
+        .eq('entries.periodo_fecha',perKm).eq('entries.unidad_negocio_id',selectedUnidad);
+      const mapR={}; (kmR||[]).forEach(x=>{mapR[x.rodado_id]=x.km;});
+      listaR.forEach(r=>{ if(mapR[r.id]!==undefined){ r._cargado=true; r._valor=mapR[r.id]; } });
+    }
   }
 
   if(filtered.length===0){panel.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No tenés indicadores para cargar en esta categoría y unidad.</div></div>';return;}
@@ -1215,31 +1325,35 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
   // MEDIDORES
   }else if(ind.nombre==='Consumos de luz por medidor'){
     if(medidores.length===0){inputHtml=`<div class="alert alert-info">No hay medidores cargados para esta unidad.</div>`;}
-    else{inputHtml=medidores.map(m=>`<div class="sub-entry-card">
-      <div class="sub-entry-title">Medidor ${m.numero_medidor}</div>
+    else{inputHtml=medidores.map(m=>{
+      const cargado=m._cargado;
+      return`<div class="sub-entry-card"${cargado?' style="border-color:#A8D5B5;background:#F4FAF6"':''}>
+      <div class="sub-entry-title">Medidor ${m.numero_medidor} ${cargado?'<span style="color:var(--success);font-size:.72rem;font-weight:600">✓ cargado</span>':''}</div>
       <div class="sub-entry-meta">${m.empresa||''}</div>
       <div class="inline-row">
-        <input type="number" class="form-input" id="med-${id}-${m.id}" placeholder="kWh" style="width:140px" step="any"/>
+        <input type="number" class="form-input" id="med-${id}-${m.id}" placeholder="kWh" style="width:140px" step="any" value="${cargado?m._valor:''}" ${cargado?'readonly':''}/>
         <span style="font-size:.78rem;color:var(--muted)">kWh</span>
-        <button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${unidadId}','${periodoFijo}')">Guardar</button>
+        ${cargado?'':`<button class="btn btn-accent btn-sm" onclick="guardarMedidor('${id}','${m.id}','${unidadId}','${periodoFijo}')">Guardar</button>`}
       </div>
       <div id="msg-med-${id}-${m.id}"></div>
-    </div>`).join('');}
+    </div>`;}).join('');}
 
   // RODADOS
   }else if(ind.nombre==='Kilometraje por camioneta'){
     const lista=rodados.length>0?rodados:rodadosBsAs;
     if(lista.length===0){inputHtml=`<div class="alert alert-info">No hay rodados cargados para esta unidad.</div>`;}
-    else{inputHtml=lista.map(r=>`<div class="sub-entry-card">
-      <div class="sub-entry-title">${r.patente} ${r.campos?.nombre?`<span style="font-size:.72rem;color:var(--muted)">· ${r.campos.nombre}</span>`:''}</div>
+    else{inputHtml=lista.map(r=>{
+      const cargado=r._cargado;
+      return`<div class="sub-entry-card"${cargado?' style="border-color:#A8D5B5;background:#F4FAF6"':''}>
+      <div class="sub-entry-title">${r.patente} ${r.campos?.nombre?`<span style="font-size:.72rem;color:var(--muted)">· ${r.campos.nombre}</span>`:''} ${cargado?'<span style="color:var(--success);font-size:.72rem;font-weight:600">✓ cargado</span>':''}</div>
       <div class="sub-entry-meta">${r.descripcion||''}</div>
       <div class="inline-row">
-        <input type="number" class="form-input" id="rod-km-${id}-${r.id}" placeholder="km actuales" style="width:150px"/>
-        <div class="upload-zone" style="flex:1;padding:.4rem .75rem;font-size:.75rem" onclick="document.getElementById('odo-${r.id}').click()">📷 Foto odómetro<input type="file" id="odo-${r.id}" accept="image/*" style="display:none"/></div>
-        <button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${unidadId}','${periodoFijo}')">Guardar</button>
+        <input type="number" class="form-input" id="rod-km-${id}-${r.id}" placeholder="km actuales" style="width:150px" value="${cargado?r._valor:''}" ${cargado?'readonly':''}/>
+        ${cargado?'':`<div class="upload-zone" style="flex:1;padding:.4rem .75rem;font-size:.75rem" onclick="document.getElementById(\'odo-${r.id}\').click()">📷 Foto odómetro<input type="file" id="odo-${r.id}" accept="image/*" style="display:none"/></div>`}
+        ${cargado?'':`<button class="btn btn-accent btn-sm" onclick="guardarKm('${id}','${r.id}','${unidadId}','${periodoFijo}')">Guardar</button>`}
       </div>
       <div id="msg-rod-${id}-${r.id}"></div>
-    </div>`).join('');}
+    </div>`;}).join('');}
 
   // INDICADORES CON VARIABLES
   }else{

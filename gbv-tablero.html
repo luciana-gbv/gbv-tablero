@@ -674,8 +674,37 @@ async function loadIndicatorsPanel(){
   ]);
 
   const periodoValsCache=_periodoValsCache[periodoRef+'_'+selectedUnidad]||{};
-  // Renderizar de forma síncrona — sin más consultas
-  panel.innerHTML=filtered.map(ind=>renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,_varCache,periodoValsCache)).join('');
+
+  // ── Opción B: ocultar los que ya se cargaron para su período actual (por indicador+unidad) ──
+  const idsFiltered=filtered.map(i=>i.id);
+  let cargadosSet=new Set();
+  if(idsFiltered.length>0 && selectedUnidad){
+    const{data:entradasU}=await sb.from('entries')
+      .select('indicador_id,periodo_fecha')
+      .eq('unidad_negocio_id', selectedUnidad)
+      .in('indicador_id', idsFiltered);
+    (entradasU||[]).forEach(e=>cargadosSet.add(e.indicador_id+'_'+e.periodo_fecha));
+  }
+  // Los de varias entradas por unidad (medidor/rodado/por campo) no se ocultan
+  const esMultiEntrada=(ind)=> ind.por_campo || ['Consumos de luz por medidor','Kilometraje por camioneta'].includes(ind.nombre);
+  const estaCargado=(ind)=> !esMultiEntrada(ind) && cargadosSet.has(ind.id+'_'+getPeriodoFijo(ind));
+  const pendientes=filtered.filter(i=>!estaCargado(i));
+  const yaCargados=filtered.filter(i=>estaCargado(i));
+
+  // Renderizar: pendientes normal; ya cargados en una sección al pie
+  let html=pendientes.map(ind=>renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,_varCache,periodoValsCache)).join('');
+  if(pendientes.length===0){
+    html=`<div class="card"><div style="text-align:center;padding:1.5rem;color:var(--accent)"><div style="font-size:1.6rem;margin-bottom:.4rem">✓</div><div style="font-size:.9rem">¡Todo cargado en esta categoría y unidad!</div></div></div>`;
+  }
+  if(yaCargados.length>0){
+    html+=`<div class="card" style="margin-top:.5rem">
+      <div class="card-title">✓ Ya cargadas este período (${yaCargados.length})</div>
+      <div style="margin-top:.4rem">
+        ${yaCargados.map(ind=>`<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;font-size:.85rem;color:var(--muted)"><span style="color:var(--accent)">✓</span> ${ind.nombre}</div>`).join('')}
+      </div>
+    </div>`;
+  }
+  panel.innerHTML=html;
 }
 
 // Cache de variables por indicador y valores pre-cargados por período
@@ -1172,7 +1201,7 @@ async function guardarEntryVars(indId, unidadId, periodoFijo){
     const valor=parseFloat(valEl?.value)||null;
     const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,periodo_fecha:periodoFijo});
     if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
-    else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);}
+    else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>loadIndicatorsPanel(),1200);}
     return;
   }
 
@@ -1204,7 +1233,7 @@ async function guardarEntryVars(indId, unidadId, periodoFijo){
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
   document.getElementById('ind-card-'+indId)?.classList.add('done');
   _valCache={};
-  setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  setTimeout(()=>loadIndicatorsPanel(),1200);
 }
 
 function handleFile(id,input){const f=input.files[0];if(f){const el=document.getElementById('file-name-'+id);if(el)el.textContent='✓ '+f.name;}}

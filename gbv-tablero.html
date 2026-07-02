@@ -688,6 +688,23 @@ async function guardarTenencia(campoId, hectareas){
   if(msg){msg.textContent='✓ Guardado';msg.className='msg-ok';setTimeout(()=>{if(msg)msg.textContent='';},2500);}
 }
 
+async function enviarRecordatoriosAhora(){
+  const btn=document.getElementById('btn-recordatorios');
+  const msg=document.getElementById('recordatorios-msg');
+  if(!confirm('¿Enviar los mails de recordatorio ahora? Se mandará un mail a cada responsable con sus vencimientos y rechazados.'))return;
+  if(btn){btn.disabled=true;btn.textContent='Enviando...';}
+  if(msg){msg.textContent='';msg.className='';}
+  try{
+    const{data,error}=await sb.functions.invoke('enviar-recordatorios',{body:{}});
+    if(error)throw error;
+    const n=data?.enviados??0;
+    if(msg){msg.textContent=`✓ ${n} mail${n===1?'':'s'} enviado${n===1?'':'s'}`;msg.className='msg-ok';}
+  }catch(e){
+    if(msg){msg.textContent='Error: '+(e.message||'no se pudo enviar');msg.className='msg-err';}
+  }
+  if(btn){btn.disabled=false;btn.textContent='📧 Enviar recordatorios por email ahora';}
+}
+
 // ── RESUMEN ──
 async function renderResumen(){
   const{data:entries}=await sb.from('entries')
@@ -698,6 +715,7 @@ async function renderResumen(){
   main.innerHTML=`
     <div class="section-heading">Resumen</div>
     <div class="section-sub">Vista general · ${new Date().toLocaleDateString('es-AR',{month:'long',year:'numeric'})}</div>
+    ${currentProfile.rol==='programador'?`<div style="margin-bottom:1rem"><button class="btn btn-sm" id="btn-recordatorios" onclick="enviarRecordatoriosAhora()">📧 Enviar recordatorios por email ahora</button> <span id="recordatorios-msg" style="font-size:.8rem;margin-left:.5rem"></span></div>`:''}
     <div class="metrics-grid">
       <div class="metric-card"><div class="metric-label">Unidades de negocio</div><div class="metric-value">${allUnidades.length}</div></div>
       <div class="metric-card"><div class="metric-label">Campos</div><div class="metric-value">${allCampos.length}</div></div>

@@ -738,21 +738,21 @@ async function preloadValoresPeriodo(periodo, unidadId){
   if(_periodoValsCache[cacheKey]) return;
   if(!periodo||!unidadId){_periodoValsCache[cacheKey]={};return;}
   const{data}=await sb.from('entry_variables')
-    .select('clave,valor,entries!inner(periodo_fecha,unidad_negocio_id)')
+    .select('clave,valor,entries!inner(periodo_fecha,unidad_negocio_id,indicador_id)')
     .eq('entries.periodo_fecha', periodo)
     .eq('entries.unidad_negocio_id', unidadId);
   const result={};
-  (data||[]).forEach(ev=>{ if(!(ev.clave in result)) result[ev.clave]=ev.valor; });
+  (data||[]).forEach(ev=>{ const k=ev.entries.indicador_id+'_'+ev.clave; if(!(k in result)) result[k]=ev.valor; });
   _periodoValsCache[cacheKey]=result;
 }
 
-async function getValoresPeriodo(claves, periodo, unidadId){
+async function getValoresPeriodo(indId, claves, periodo, unidadId){
   if(!claves.length||!periodo) return {};
   const cacheKey=periodo+'_'+unidadId;
   if(!_periodoValsCache[cacheKey]) await preloadValoresPeriodo(periodo, unidadId);
   const cache=_periodoValsCache[cacheKey]||{};
   const result={};
-  claves.forEach(c=>{ if(c in cache) result[c]=cache[c]; });
+  claves.forEach(c=>{ const k=indId+'_'+c; if(k in cache) result[c]=cache[k]; });
   return result;
 }
 
@@ -961,7 +961,7 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
       inputHtml=`
         <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
           ${inputVars.map(v=>{
-            const preval=preCargados[v.clave];
+            const preval=preCargados[id+'_'+v.clave];
             const bloqueado=preval!==undefined;
             const esHectareas=v.clave==='hectareas_campo';
             const valorHa=esHectareas?hasTotal:null;
@@ -1087,7 +1087,7 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
       inputHtml=`
         <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
           ${inputVars.map(v=>{
-            const preval=preCargados[v.clave];
+            const preval=preCargados[id+'_'+v.clave];
             const bloqueado=preval!==undefined;
             // Pre-llenar hectáreas automáticamente desde la unidad de negocio
             const esHectareas=v.clave==='hectareas_campo';
@@ -1139,7 +1139,7 @@ async function onFechaChange(indId, unidadId){
   const vars=await getVariables(indId);
   const inputVars=vars.filter(v=>!v.es_calculado);
   const claves=inputVars.map(v=>v.clave);
-  const preCargados=await getValoresPeriodo(claves, fecha, unidadId);
+  const preCargados=await getValoresPeriodo(indId, claves, fecha, unidadId);
   inputVars.forEach(v=>{
     const inp=document.getElementById(`var-${indId}-${v.clave}`);
     if(!inp) return;
@@ -1201,7 +1201,7 @@ async function guardarEntryVars(indId, unidadId, periodoFijo){
     const valor=parseFloat(valEl?.value)||null;
     const{error}=await sb.from('entries').insert({indicador_id:indId,unidad_negocio_id:unidadId||null,user_id:currentUser.id,valor,periodo_fecha:periodoFijo});
     if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
-    else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>loadIndicatorsPanel(),1200);}
+    else{if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}document.getElementById('ind-card-'+indId)?.classList.add('done');setTimeout(()=>{document.getElementById('ind-card-'+indId)?.remove();},1000);}
     return;
   }
 
@@ -1233,7 +1233,7 @@ async function guardarEntryVars(indId, unidadId, periodoFijo){
   if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
   document.getElementById('ind-card-'+indId)?.classList.add('done');
   _valCache={};
-  setTimeout(()=>loadIndicatorsPanel(),1200);
+  setTimeout(()=>{document.getElementById('ind-card-'+indId)?.remove();},1000);
 }
 
 function handleFile(id,input){const f=input.files[0];if(f){const el=document.getElementById('file-name-'+id);if(el)el.textContent='✓ '+f.name;}}

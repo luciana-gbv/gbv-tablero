@@ -688,6 +688,93 @@ async function guardarTenencia(campoId, hectareas){
   if(msg){msg.textContent='✓ Guardado';msg.className='msg-ok';setTimeout(()=>{if(msg)msg.textContent='';},2500);}
 }
 
+// ── ECOLOGÍA / ANÁLISIS DE SUELO (fósforo ppm, materia orgánica %, PH) ──
+let ecologiaAnio=new Date().getFullYear();
+function setEcologiaAnio(v){ ecologiaAnio=parseInt(v); renderEcologia('ecologia-body'); }
+
+async function renderEcologia(targetId){
+  const cont=document.getElementById(targetId||'main-content');
+  if(!cont)return;
+  cont.innerHTML='<div class="loading">Cargando...</div>';
+  const[{data:inds},{data:campos},{data:vals}]=await Promise.all([
+    sb.from('indicadores').select('id,nombre,unidad_medida').eq('categoria','ecologia').eq('activo',true).order('nombre'),
+    sb.from('campos').select('id,nombre').eq('activo',true).order('nombre'),
+    sb.from('ecologia_campos').select('*').eq('anio',ecologiaAnio)
+  ]);
+  const anioActual=new Date().getFullYear();
+  const anios=[anioActual-2,anioActual-1,anioActual,anioActual+1];
+  const umLabel={ppm:'ppm',porcentaje:'%',numero:''};
+  let html=`<div class="section-sub">Análisis de suelo por campo. Cada indicador es independiente: agregá los campos que correspondan con el botón.</div>
+    <div class="form-group" style="max-width:200px;margin-bottom:1rem">
+      <label class="form-label">Año</label>
+      <select class="form-input" onchange="setEcologiaAnio(this.value)">
+        ${anios.map(a=>`<option value="${a}" ${a===ecologiaAnio?'selected':''}>${a}</option>`).join('')}
+      </select>
+    </div>`;
+  (inds||[]).forEach(ind=>{
+    const um=umLabel[ind.unidad_medida]??ind.unidad_medida;
+    const cargados=(vals||[]).filter(v=>v.indicador_id===ind.id);
+    const idsCargados=new Set(cargados.map(v=>v.campo_id));
+    const disponibles=(campos||[]).filter(c=>!idsCargados.has(c.id));
+    html+=`<div class="card" style="margin-bottom:1rem">
+      <div class="card-title">${ind.nombre} <span style="font-size:.75rem;color:var(--muted);font-weight:400">${um?('· '+um):''}</span></div>`;
+    if(cargados.length>0){
+      html+=cargados.map(v=>{
+        const campo=(campos||[]).find(c=>c.id===v.campo_id);
+        return `<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--border)">
+          <span style="flex:1;font-size:.85rem">${campo?.nombre||'—'}</span>
+          <input type="number" class="form-input" style="width:110px" id="eco-${ind.id}-${v.campo_id}" value="${v.valor??''}" step="any"/>
+          <span style="font-size:.72rem;color:var(--muted);min-width:26px">${um}</span>
+          <button class="btn btn-sm" onclick="guardarEco('${ind.id}','${v.campo_id}')">Guardar</button>
+          <button class="btn btn-sm" style="background:#F4E4E4;color:#8B1C1C" onclick="quitarEco('${ind.id}','${v.campo_id}')">🗑️</button>
+          <span id="eco-msg-${ind.id}-${v.campo_id}" style="font-size:.75rem"></span>
+        </div>`;
+      }).join('');
+    } else {
+      html+=`<div style="font-size:.8rem;color:var(--muted);padding:.5rem 0">Todavía no hay campos cargados para este indicador.</div>`;
+    }
+    if(disponibles.length>0){
+      html+=`<div style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem;padding-top:.6rem;border-top:1px dashed var(--border)">
+        <select class="form-input" id="eco-add-campo-${ind.id}" style="flex:1">
+          <option value="">+ Agregar campo...</option>
+          ${disponibles.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}
+        </select>
+        <input type="number" class="form-input" style="width:110px" id="eco-add-valor-${ind.id}" placeholder="valor" step="any"/>
+        <button class="btn btn-accent btn-sm" onclick="agregarEco('${ind.id}')">Agregar</button>
+      </div>`;
+    } else {
+      html+=`<div style="font-size:.75rem;color:var(--muted);margin-top:.5rem">Todos los campos ya están cargados.</div>`;
+    }
+    html+=`</div>`;
+  });
+  cont.innerHTML=html;
+}
+
+async function agregarEco(indId){
+  const campoId=document.getElementById('eco-add-campo-'+indId)?.value;
+  const valor=document.getElementById('eco-add-valor-'+indId)?.value;
+  if(!campoId){alert('Elegí un campo del desplegable.');return;}
+  if(valor===''||valor==null){alert('Poné un valor.');return;}
+  const{error}=await sb.from('ecologia_campos').upsert({indicador_id:indId,campo_id:campoId,anio:ecologiaAnio,valor:parseFloat(valor),updated_at:new Date().toISOString()},{onConflict:'indicador_id,campo_id,anio'});
+  if(error){alert('Error: '+error.message);return;}
+  renderEcologia('ecologia-body');
+}
+
+async function guardarEco(indId,campoId){
+  const valor=document.getElementById('eco-'+indId+'-'+campoId)?.value;
+  const msg=document.getElementById('eco-msg-'+indId+'-'+campoId);
+  const{error}=await sb.from('ecologia_campos').upsert({indicador_id:indId,campo_id:campoId,anio:ecologiaAnio,valor:valor===''?null:parseFloat(valor),updated_at:new Date().toISOString()},{onConflict:'indicador_id,campo_id,anio'});
+  if(error){if(msg){msg.textContent='Error';msg.style.color='#8B1C1C';}return;}
+  if(msg){msg.textContent='✓';msg.style.color='var(--success)';setTimeout(()=>{if(msg)msg.textContent='';},2000);}
+}
+
+async function quitarEco(indId,campoId){
+  if(!confirm('¿Quitar este campo del indicador?'))return;
+  const{error}=await sb.from('ecologia_campos').delete().eq('indicador_id',indId).eq('campo_id',campoId).eq('anio',ecologiaAnio);
+  if(error){alert('Error: '+error.message);return;}
+  renderEcologia('ecologia-body');
+}
+
 async function enviarRecordatoriosAhora(){
   const btn=document.getElementById('btn-recordatorios');
   const msg=document.getElementById('recordatorios-msg');
@@ -780,12 +867,14 @@ async function renderCarga(){
   if(cargaSubTab==='aprobar' && !puedeAprobar) cargaSubTab='cargar';
   if(cargaSubTab==='corregir' && nRech===0) cargaSubTab='cargar';
   if(cargaSubTab==='tenencia' && !puedeTenencia) cargaSubTab='cargar';
+  if(cargaSubTab==='ecologia' && !puedeTenencia) cargaSubTab='cargar';
 
   const mostrarSubtabs = puedeAprobar || puedeTenencia || nRech>0;
   const subtabs = mostrarSubtabs ? `<div class="tab-row" style="margin-bottom:1rem">
       <button class="tab-btn ${cargaSubTab==='cargar'?'active':''}" onclick="cargaTab('cargar')">Cargar datos</button>
       ${nRech>0?`<button class="tab-btn ${cargaSubTab==='corregir'?'active':''}" onclick="cargaTab('corregir')" style="color:#8B1C1C">⚠ Para corregir (${nRech})</button>`:''}
       ${puedeTenencia?`<button class="tab-btn ${cargaSubTab==='tenencia'?'active':''}" onclick="cargaTab('tenencia')">Tenencia de campos</button>`:''}
+      ${puedeTenencia?`<button class="tab-btn ${cargaSubTab==='ecologia'?'active':''}" onclick="cargaTab('ecologia')">Análisis de suelo</button>`:''}
       ${puedeAprobar?`<button class="tab-btn ${cargaSubTab==='aprobar'?'active':''}" onclick="cargaTab('aprobar')">Aprobaciones</button>`:''}
     </div>` : '';
 
@@ -800,6 +889,13 @@ async function renderCarga(){
   if(puedeTenencia && cargaSubTab==='tenencia'){
     main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="tenencia-body"><div class="loading">Cargando...</div></div>`;
     renderTenencia('tenencia-body');
+    return;
+  }
+
+  // Sub-pestaña Análisis de suelo / Ecología (Federico / admins)
+  if(puedeTenencia && cargaSubTab==='ecologia'){
+    main.innerHTML=`<div class="section-heading">Carga de datos</div>${subtabs}<div id="ecologia-body"><div class="loading">Cargando...</div></div>`;
+    renderEcologia('ecologia-body');
     return;
   }
 

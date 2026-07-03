@@ -1910,110 +1910,124 @@ const CONDICIONES_LIDERAZGO=[
   'Cuida el patrimonio de la empresa.',
 ];
 
-// Puestos que son encargados/responsables (usan tabla de liderazgo)
-const PUESTOS_LIDERAZGO=['encargado','coo','9_coo'];
+// Puestos que son encargados/responsables (usan tabla de liderazgo: suman 3 condiciones y multiplicador x3)
+const PUESTOS_LIDERAZGO=['encargado','capataz','responsable_produccion','coo'];
 
 // Objetivos por puesto
 const OBJETIVOS_PUESTO={
-  '1':[
-    {label:'Facturación correcta (% NC/ND/facturas anuladas)',pts:[1,3,5],rangos:['20%>x>11%','1%<x<10%','0%']},
-    {label:'Cobros hechos a tiempo (tiempo promedio acreditación)',pts:[1,3,5],rangos:['Dentro de 5 días del vencimiento','Dentro de 3 días del vencimiento','Dentro de 48hs del vencimiento']},
-    {label:'Sueldos procesados y pagados a tiempo (meses en el año)',pts:[1,3,5],rangos:['10 meses','11 meses','12 meses']},
-    {label:'Archivo cumplimentado (revisión agosto)',pts:[0,5],rangos:['Incompleto','100% completado']},
-  ],
-  '2':[
-    {label:'Pagos a proveedores a tiempo (% dentro del vencimiento)',pts:[0.8,2.4,4],rangos:['70-79%','80-89%','90-100%']},
-    {label:'Tiempo ágil de proceso de facturas (tiempo promedio)',pts:[0.8,2.4,4],rangos:['>8 minutos','6-8 minutos','<5 minutos']},
-    {label:'Reducción de errores de proceso (comprobantes reprocesados)',pts:[0.8,2.4,4],rangos:['21-25%','11-20%','0-10%']},
-    {label:'Comunicar pago a proveedores (satisfacción 10 proveedores)',pts:[0.8,2.4,4],rangos:['70-80% satisfechos','81-90% satisfechos','91-100% satisfechos']},
-    {label:'Archivo cumplimentado (revisión agosto)',pts:[0,4],rangos:['Incompleto','100% completado']},
-  ],
-  '3':[
-    {label:'Libros y firmas al día',pts:[1,3,5],rangos:['Falta info hasta 1 mes antes','Completos sin firmas','Completos y firmados']},
+  // ── ADMINISTRACIÓN ──
+  'impuestos_societario':[
+    {label:'Libros y firmas al día',pts:[1,3,5],rangos:['Faltan datos hasta 1 mes antes','Completos pero faltan firmas','Completos y firmados']},
     {label:'Subdiario de IVA al día',pts:[1,3,5],rangos:['Completo a 2 meses atrás','Completo a 1 mes atrás','Completo a la fecha']},
-    {label:'Firma electrónica para pago de proveedores (días entre proceso y pago)',pts:[1,3,5],rangos:['2.5-3.5 días','1.6-2.5 días','1-1.5 días']},
+    {label:'Presentaciones de impuestos al día y correctas',pts:[0,0,5],rangos:['No aplica','No aplica','Impuestos al día']},
     {label:'Archivo cumplimentado (revisión agosto)',pts:[0,5],rangos:['Incompleto','100% completado']},
   ],
-  '4':[
+  'proveedores':[
+    {label:'Pagos a proveedores a tiempo (% dentro del vencimiento)',pts:[0.8,2.4,4],rangos:['70-79%','80-89%','90-100%']},
+    {label:'Tiempo ágil de proceso de facturas (tiempo promedio)',pts:[0.8,2.4,4],rangos:['Más de 8 min','6-8 min','Menos de 5 min']},
+    {label:'Reducción de errores de proceso (comprobantes reprocesados)',pts:[0.8,2.4,4],rangos:['21-25%','11-20%','0-10%']},
+    {label:'Comunicar pago a proveedores (satisfacción de 10 proveedores)',pts:[0.8,2.4,4],rangos:['70-80% satisfechos','81-90% satisfechos','91-100% satisfechos']},
+  ],
+  'auxiliar_admin_finanzas':[
     {label:'Buen seguimiento de contratos (planilla completa)',pts:[0,0,4],rangos:['No aplica','No aplica','Completa']},
-    {label:'Pagos de agenda sin retrasos (% fuera de término en 6 meses)',pts:[0.8,2.4,4],rangos:['6-10%','<5%','0%']},
+    {label:'Pagos de agenda sin retrasos (% fuera de término en 6 meses)',pts:[0.8,2.4,4],rangos:['6-10%','Menos de 5%','0%']},
     {label:'Conciliaciones bancarias',pts:[0.8,2.4,4],rangos:['En tiempo con varios errores','En tiempo, a veces con errores','En tiempo y forma']},
-    {label:'Trabajar efectivamente con control presupuesto Mendoza',pts:[0,2.4,4],rangos:['No aplica','Respuesta efectiva','Respuesta veloz y efectiva']},
+    {label:'Trabajar con control de presupuesto de Mendoza',pts:[0,2.4,4],rangos:['No aplica','Respuesta efectiva','Respuesta veloz y efectiva']},
     {label:'Archivo cumplimentado (revisión agosto)',pts:[0,4],rangos:['Incompleto','100% completado']},
   ],
-  '5':[
-    {label:'Cargas sociales bien hechas',pts:[0.8,2.4,4],rangos:['A tiempo con algunos errores','A tiempo con pocos errores','En tiempo y forma']},
+  'recepcion_secretaria':[
+    {label:'Cargas sociales bien hechas',pts:[0.8,2.4,4],rangos:['A tiempo con algunos errores','A tiempo, a veces con errores','En tiempo y forma']},
     {label:'Atención en reuniones y presentación de salas',pts:[0.8,2.4,4],rangos:['Buena','Muy buena','Excelente']},
-    {label:'Formalidades del remate hechas en tiempo y forma',pts:[0.8,2.4,4],rangos:['Con bastantes retrasos','Con algún retraso y pocos errores','Sí']},
     {label:'Buena atención de la recepción',pts:[0.8,2.4,4],rangos:['Buena','Muy buena','Excelente']},
-    {label:'Buena presencia',pts:[0.8,2.4,4],rangos:['Buena','Muy buena','Excelente']},
+    {label:'Facturación correcta (% NC/ND emitidas, facturas anuladas)',pts:[0.8,2.4,4],rangos:['11-20%','1-10%','0%']},
   ],
-  '6':[
-    {label:'Carga eficiente de Órdenes de Compra (días desde confirmación)',pts:[0.8,2.4,4],rangos:['Dos días o menos','Un día','En el transcurso del día']},
-    {label:'Carga eficiente de Presupuesto y CF (meses cargados)',pts:[0.8,2.4,4],rangos:['Menos de 10 meses','10-11 meses','12 meses actualizados']},
-    {label:'Recolectar información completa del proceso de compras',pts:[0.8,2.4,4],rangos:['Algunos pendientes','Casi todo al día','Sí']},
+  'asistente_ce':[
+    {label:'Formalidades del remate hechas en tiempo y forma',pts:[0.8,2.4,4],rangos:['Bastantes retrasos y pocos errores','Algún retraso y muy pocos errores','Sí']},
     {label:'Conseguir liquidaciones de venta en tiempo y forma (% fuera del mes)',pts:[0.8,2.4,4],rangos:['6-8% se pasó del mes','1-5% se pasó del mes','Ninguna se pasó del mes']},
     {label:'Cotizar y renovar seguros en tiempo y forma',pts:[0.8,2.4,4],rangos:['A tiempo con 1 cotización','2 cotizaciones a tiempo','3 o más cotizaciones a tiempo']},
+    {label:'Consolidar planillas de hacienda en tiempo y forma',pts:[0,0,4],rangos:['No aplica','No aplica','Consolidadas y cargadas en tiempo y forma']},
   ],
-  '7':[
-    {label:'Registros y certificados de hacienda al día',pts:[1.3,4,6.7],rangos:['Algunos pendientes','Casi todo al día','Sí']},
-    {label:'Buena atención post venta compradores de Cabaña (quejas)',pts:[1.3,4,6.7],rangos:['6+ quejas con informe','5 o menos quejas con informe','Sin quejas con informe']},
-    {label:'Tener los DEPs al día (% datos completos)',pts:[1.3,4,6.7],rangos:['70-75%','75-84%','85-100%']},
+  'responsable_produccion':[
+    {label:'Carga eficiente de Presupuesto y Cash Flow (meses cargados)',pts:[1,3,5],rangos:['Menos de 10 meses','10-11 meses','12 meses actualizados']},
+    {label:'Reuniones con encargados y equipo de producción (3 al año)',pts:[1,3,5],rangos:['1 reunión anual','2 reuniones anuales','3 reuniones anuales']},
+    {label:'Carga y presenta los indicadores que le corresponden',pts:[1,3,5],rangos:['60% de los indicadores','61-85% de los indicadores','Más del 86% de los indicadores']},
+    {label:'Presentar informes en reunión mensual con el Directorio',pts:[1,3,5],rangos:['7 o más reuniones anuales','Más de 9 reuniones anuales','12 reuniones anuales']},
   ],
-  '8':[
-    {label:'Firma electrónica para pago de proveedores (días)',pts:[1,3,5],rangos:['2.5-3.5 días','1.6-2.5 días','1-1.5 días']},
-    {label:'Correcta imputación de facturas',pts:[1,3,5],rangos:['Certeros con reiterados asientos fuera del sistema','Bastante certeros con pocos asientos fuera','Certeros sin asientos fuera del sistema']},
+  'segundo_contador':[
+    {label:'Firma electrónica para pago de proveedores (días entre proceso y pago)',pts:[1,3,5],rangos:['2.5-3.5 días','1.6-2.5 días','1-1.5 días']},
+    {label:'Correcta imputación de las facturas',pts:[1,3,5],rangos:['Certeros con reiterados asientos fuera del sistema','Bastante certeros, pocos asientos fuera','Certeros sin asientos fuera del sistema']},
     {label:'Soporte a Estudio Contable-Impositivo',pts:[1,3,5],rangos:['Buena','Muy buena','Excelente']},
     {label:'Soporte interno a la administración',pts:[1,3,5],rangos:['Buena','Muy buena','Excelente']},
   ],
-  'A_sur':[
+  // ── ESCRIBIENTE / ADMINISTRATIVO DE CAMPO ──
+  'administrativo_campo':[
+    {label:'Carga eficiente de requerimiento de compra y remito (% vs facturas)',pts:[1,3,5],rangos:['80-84%','85-89%','90-100%']},
+    {label:'Carga de ventas de hacienda',pts:[1,3,5],rangos:['80-84%','85-89%','90-100%']},
+    {label:'Carga de planilla de hacienda (día hábil)',pts:[1,3,5],rangos:['5° día hábil o más','2°-4° día hábil','1° día hábil']},
+    {label:'Carga de cajas chicas en sistema (% cajas)',pts:[1,3,5],rangos:['70-84%','85-89%','90-100%']},
+  ],
+  // ── ENCARGADOS POR ZONA ──
+  'Encargado_BA':[
     {label:'Mantener el campo prolijo',pts:[1,3,5],rangos:['Razonablemente prolijo','Bastante prolijo','Muy prolijo']},
     {label:'Mantenimiento estructural del campo (uso del presupuesto)',pts:[1,3,5],rangos:['Usó menos pero está bien','Usó eficientemente','Usó muy eficientemente']},
-    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.1-2%','0.6-1%','<0.5%']},
+    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.1-2%','0.6-1%','Menor al 0.5%']},
     {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['80-84%','85-90%','91-100%']},
     {label:'Porcentaje de parición',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
-    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','Menor al 1%']},
   ],
-  'A_norte':[
+  'Encargado_Corrientes':[
     {label:'Mantener el campo prolijo',pts:[1,3,5],rangos:['Razonablemente prolijo','Bastante prolijo','Muy prolijo']},
     {label:'Mantenimiento estructural del campo (uso del presupuesto)',pts:[1,3,5],rangos:['Usó menos pero está bien','Usó eficientemente','Usó muy eficientemente']},
-    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.6-2.5%','1.1-1.5%','<1%']},
+    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.6-2.5%','1.1-1.5%','Menor al 1%']},
     {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
     {label:'Porcentaje de parición',pts:[1,3,5],rangos:['64-72%','73-79%','80-100%']},
-    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','Menor al 1%']},
   ],
-  'B':[
-    {label:'Carga eficiente de requerimiento de compra y remito (% vs facturas)',pts:[0.8,2.4,4],rangos:['80-84%','85-89%','90-100%']},
-    {label:'Carga de ventas de hacienda',pts:[0.8,2.4,4],rangos:['80-84%','85-89%','90-100%']},
-    {label:'Carga de partes de trabajo (días desde realizado)',pts:[0.8,2.4,4],rangos:['15-30 días','7-15 días','Dentro de la semana']},
-    {label:'Carga de planilla de hacienda (día hábil)',pts:[0.8,2.4,4],rangos:['5° día hábil o más','2°-4° día hábil','1° día hábil']},
-    {label:'Carga de cajas chicas en sistema (% cajas)',pts:[0.8,2.4,4],rangos:['70-84%','85-89%','90-100%']},
-  ],
-  'C_sur':[
-    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.1-2%','0.6-1%','<0.5%']},
+  // ── CAPATACES POR ZONA ──
+  'Capataz_BA':[
+    {label:'Ganancia de kilos en período de recría (gramos por día)',pts:[1,3,5],rangos:['200-300 grs/día','301-600 grs/día','Más de 600 grs/día']},
     {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['80-84%','85-90%','91-100%']},
-    {label:'Porcentaje de parición',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
-    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+    {label:'Alto porcentaje de ternero logrado',pts:[1,3,5],rangos:['80-84%','85-94%','95-100%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','Menor al 1%']},
   ],
-  'C_norte':[
-    {label:'Diferencia de inventario en cabezas',pts:[1,3,5],rangos:['1.6-2.5%','1.1-1.5%','<1%']},
+  'Capataz_Corrientes':[
+    {label:'Ganancia de kilos en período en verdeos (gramos por día)',pts:[1,3,5],rangos:['200-300 grs/día','301-600 grs/día','Más de 600 grs/día']},
     {label:'Porcentaje de preñez',pts:[1,3,5],rangos:['75-79%','80-84%','85-100%']},
-    {label:'Porcentaje de parición',pts:[1,3,5],rangos:['64-72%','73-79%','80-100%']},
-    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','<1%']},
+    {label:'Alto porcentaje de ternero logrado',pts:[1,3,5],rangos:['70-74%','75-79%','80-100%']},
+    {label:'Baja mortandad de hacienda',pts:[1,3,5],rangos:['2.1-4%','1.1-2%','Menor al 1%']},
   ],
-  '9_coo':[
-    {label:'Cumplimiento de objetivos del área',pts:[1,3,5],rangos:['Parcial','Bueno','Excelente']},
-    {label:'Coordinación con el equipo',pts:[1,3,5],rangos:['Básica','Buena','Muy buena']},
-    {label:'Presentación de informes en tiempo y forma',pts:[1,3,5],rangos:['Con retrasos','Casi siempre a tiempo','Siempre a tiempo']},
+  // ── PUESTERO / PEÓN (misma tabla) ──
+  'peon':[
+    {label:'Cuidado del puesto o de la vivienda',pts:[1,3,5],rangos:['Regular estado de mantenimiento y limpieza','Estado aceptable','Excelente estado']},
+    {label:'Cumplimiento de tareas asignadas',pts:[1,3,5],rangos:['No hay buen cumplimiento','Se cumplen las tareas','Excelente cumplimiento en tiempo y forma']},
+    {label:'Eficiencia del recurso agua de su área',pts:[1,3,5],rangos:['Ineficiente','Eficiencia aceptable','Eficiencia excelente']},
+    {label:'Eficiencia del recurso alambrado y pastoreo de su área',pts:[1,3,5],rangos:['Ineficiente','Eficiencia aceptable','Eficiencia excelente']},
+  ],
+  'puestero':[
+    {label:'Cuidado del puesto o de la vivienda',pts:[1,3,5],rangos:['Regular estado de mantenimiento y limpieza','Estado aceptable','Excelente estado']},
+    {label:'Cumplimiento de tareas asignadas',pts:[1,3,5],rangos:['No hay buen cumplimiento','Se cumplen las tareas','Excelente cumplimiento en tiempo y forma']},
+    {label:'Eficiencia del recurso agua de su área',pts:[1,3,5],rangos:['Ineficiente','Eficiencia aceptable','Eficiencia excelente']},
+    {label:'Eficiencia del recurso alambrado y pastoreo de su área',pts:[1,3,5],rangos:['Ineficiente','Eficiencia aceptable','Eficiencia excelente']},
+  ],
+  // ── CABAÑERO ──
+  'cabanero':[
+    {label:'Cuidado del puesto o de la vivienda',pts:[1,3,5],rangos:['Mal estado de mantenimiento y limpieza','Estado aceptable','Excelente estado']},
+    {label:'Eficiencia de terneros (de embriones) destetados',pts:[1,3,5],rangos:['80-85% destetados','86-93% destetados','Más de 94% destetados']},
+    {label:'Composición corporal de reproductores',pts:[1,3,5],rangos:['Condición menor a 2 o mayor a 4','Condición próxima a 3','Condición óptima: 3']},
+    {label:'Desempeño en exposiciones',pts:[1,3,5],rangos:['Participación sin resultados','Participación con mención','Premios mayores']},
   ],
 };
 
-// El encargado usa la tabla de objetivos según su zona de evaluación:
-// Prov. Bs As -> A_sur, Norte -> A_norte, Mendoza -> A_mendoza (todavía sin tabla).
-// Cualquier otro puesto usa su propio código como clave.
+// Mapea cada empleado a su tabla de objetivos.
+// Mendoza: por ahora SIN tabla (solo actitudinal). Encargado y Capataz: por zona.
 function claveObjetivos(emp){
+  if(emp.zona_evaluacion==='Mendoza') return null;
   if(emp.puesto_codigo==='encargado'){
-    const Z={'Prov. Bs As':'A_sur','Norte':'A_norte','Mendoza':'A_mendoza'};
+    const Z={'Prov. Bs As':'Encargado_BA','Norte':'Encargado_Corrientes'};
+    return Z[emp.zona_evaluacion]||null;
+  }
+  if(emp.puesto_codigo==='capataz'){
+    const Z={'Prov. Bs As':'Capataz_BA','Norte':'Capataz_Corrientes'};
     return Z[emp.zona_evaluacion]||null;
   }
   return emp.puesto_codigo;
@@ -2181,33 +2195,35 @@ async function renderRRHH(){
         <div class="form-group"><label class="form-label">Puesto</label>
           <select class="form-select" id="emp-puesto">
             <optgroup label="Campo">
-              <option value="peon">Peón general</option>
+              <option value="peon">Peón</option>
               <option value="puestero">Puestero</option>
+              <option value="capataz">Capataz</option>
+              <option value="encargado">Encargado</option>
+              <option value="cabanero">Cabañero</option>
+              <option value="administrativo_campo">Escribiente / Administrativo de campo</option>
               <option value="casero">Casero</option>
               <option value="tractorista">Tractorista</option>
-              <option value="capataz">Capataz</option>
               <option value="cocinera">Cocinera</option>
               <option value="parquero">Parquero</option>
               <option value="mixero_feedlot">Mixero / Feedlot</option>
               <option value="chofer">Chofer</option>
               <option value="servicio">Servicio</option>
               <option value="cuidador">Cuidador</option>
-              <option value="cabanero">Cabañero</option>
+              <option value="segundo_encargado">Segundo encargado</option>
               <option value="cuadro_honor">Cuadro de honor</option>
-              <option value="encargado">Encargado</option>
-              <option value="escribiente">Escribiente</option>
             </optgroup>
-            <optgroup label="Administración y otros">
-              <option value="1">Cobranzas, Ventas y Sueldos</option>
-              <option value="2">Proveedores</option>
-              <option value="3">Contaduría (libros / IVA / firma)</option>
-              <option value="4">Auxiliar de Administración y Finanzas</option>
-              <option value="5">Recepción y Secretaría</option>
-              <option value="6">Asistente de Comité Ejecutivo</option>
-              <option value="7">Cabaña / Hacienda (registros, DEPs)</option>
-              <option value="8">Segundo Contador</option>
-              <option value="9_coo">Segundo del COO</option>
+            <optgroup label="Administración y dirección">
+              <option value="proveedores">Proveedores</option>
+              <option value="impuestos_societario">Impuestos y Societario</option>
+              <option value="auxiliar_admin_finanzas">Auxiliar de Administración y Finanzas</option>
+              <option value="recepcion_secretaria">Recepción y Secretaría</option>
+              <option value="asistente_ce">Asistente de Comité Ejecutivo</option>
+              <option value="segundo_contador">Segundo Contador</option>
+              <option value="contadora">Contadora</option>
+              <option value="cadete_archivo">Cadete y Archivo</option>
+              <option value="responsable_produccion">Responsable de Producción</option>
               <option value="coo">COO</option>
+              <option value="cfo">CFO</option>
             </optgroup>
           </select>
         </div>

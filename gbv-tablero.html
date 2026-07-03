@@ -785,7 +785,7 @@ async function renderCarga(){
   const subtabs = mostrarSubtabs ? `<div class="tab-row" style="margin-bottom:1rem">
       <button class="tab-btn ${cargaSubTab==='cargar'?'active':''}" onclick="cargaTab('cargar')">Cargar datos</button>
       ${nRech>0?`<button class="tab-btn ${cargaSubTab==='corregir'?'active':''}" onclick="cargaTab('corregir')" style="color:#8B1C1C">⚠ Para corregir (${nRech})</button>`:''}
-      ${puedeTenencia?`<button class="tab-btn ${cargaSubTab==='tenencia'?'active':''}" onclick="cargaTab('tenencia')">Tenencia de campos</button>`:''}
+      ${puedeTenencia?`<button class="tab-btn ${cargaSubTab==='tenencia'?'active':''}" onclick="cargaTab('tenencia')">Distribución de hectáreas</button>`:''}
       ${puedeAprobar?`<button class="tab-btn ${cargaSubTab==='aprobar'?'active':''}" onclick="cargaTab('aprobar')">Aprobaciones</button>`:''}
     </div>` : '';
 

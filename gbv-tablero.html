@@ -763,6 +763,7 @@ async function renderResumen(){
 // ── CARGA ──
 let selectedUnidad=null;
 let cargaSubTab='cargar';   // 'cargar' | 'aprobar' (sub-pestaña dentro de Carga de datos)
+let cargaSoloIndicador=null; // si está seteado, en Cargar datos se muestra solo ese indicador (buscador)
 
 function cargaTab(name){ cargaSubTab=name; renderCarga(); }
 
@@ -831,6 +832,13 @@ async function renderCarga(){
   main.innerHTML=`
     <div class="section-heading">Carga de datos</div>${subtabs}
     <div class="section-sub">Completá los indicadores que te corresponden</div>
+    <div style="margin-bottom:1rem;position:relative;max-width:440px">
+      <input type="text" class="form-input" id="carga-search" placeholder="🔍 Buscar indicador por nombre..." oninput="buscarCargaIndicador(this.value)" autocomplete="off"/>
+      <div id="carga-search-results" style="position:absolute;top:100%;left:0;right:0;z-index:30;background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:300px;overflow-y:auto;display:none;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+    </div>
+    ${cargaSoloIndicador?`<div class="alert alert-info" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem">
+      <span>Mostrando solo: <strong>${(allIndicadores.find(i=>i.id===cargaSoloIndicador)||{}).nombre||''}</strong></span>
+      <button class="btn btn-sm" onclick="quitarFiltroCarga()">Ver todos</button></div>`:''}
     <div class="two-col">
       <div>
         <div class="card" style="margin-bottom:.75rem">
@@ -862,12 +870,38 @@ async function renderCarga(){
 
 function selectCat(cat,btn){
   selectedCat=cat;
+  cargaSoloIndicador=null;
   document.querySelectorAll('#cat-nav .sidebar-item').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');loadIndicatorsPanel();
 }
 
+function buscarCargaIndicador(texto){
+  const box=document.getElementById('carga-search-results');
+  if(!box)return;
+  const t=normalizarTexto(texto);
+  if(t.length<2){box.style.display='none';box.innerHTML='';return;}
+  const matches=allIndicadores.filter(i=>i.activo!==false && esMiIndicadorCarga(i.id) && normalizarTexto(i.nombre).includes(t)).slice(0,12);
+  if(matches.length===0){box.innerHTML='<div style="padding:.6rem .8rem;font-size:.82rem;color:var(--muted)">Sin resultados</div>';box.style.display='block';return;}
+  box.innerHTML=matches.map(i=>`<div style="padding:.55rem .8rem;cursor:pointer;font-size:.85rem;border-bottom:1px solid var(--border)" onclick="irAIndicadorCarga('${i.id}')" onmouseover="this.style.background='#F5F3EE'" onmouseout="this.style.background='transparent'">${i.nombre} <span style="color:var(--muted);font-size:.74rem">· ${CAT_LABELS[i.categoria]||i.categoria}</span></div>`).join('');
+  box.style.display='block';
+}
+
+function irAIndicadorCarga(indId){
+  const ind=allIndicadores.find(i=>i.id===indId);
+  if(!ind)return;
+  selectedCat=ind.categoria;
+  const units=indicadorUnidades[indId];
+  if(units && units.size>0 && !units.has(selectedUnidad)) selectedUnidad=[...units][0];
+  cargaSoloIndicador=indId;
+  cargaSubTab='cargar';
+  renderCarga();
+}
+
+function quitarFiltroCarga(){ cargaSoloIndicador=null; renderCarga(); }
+
 function selectUnidadNav(id,btn){
   selectedUnidad=id;
+  cargaSoloIndicador=null;
   document.querySelectorAll('#unidad-nav .sidebar-item').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');loadIndicatorsPanel();
 }
@@ -888,7 +922,8 @@ async function loadIndicatorsPanel(){
   const filtered=allIndicadores.filter(i=>
     i.categoria===selectedCat &&
     (indicadorUnidades[i.id] && indicadorUnidades[i.id].has(selectedUnidad)) &&
-    esMiIndicadorCarga(i.id)
+    esMiIndicadorCarga(i.id) &&
+    (!cargaSoloIndicador || i.id===cargaSoloIndicador)
   );
 
   // Actualizar la barra de unidades

@@ -3101,7 +3101,7 @@ async function renderInmuebles(){
           <tbody>
             ${inm.map(inm_item=>{
               const contrato=contratosPorInmueble[inm_item.id];
-              const alertaInm=alrt.find(a=>a.inmueble_id===inm_item.id&&a.tipo==='impago');
+              const alertasInm=alrt.filter(a=>a.inmueble_id===inm_item.id&&a.tipo==='impago');
               return`<tr>
                 <td style="font-size:11px;color:var(--text);padding:2px 12px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${inm_item.direccion}">${inm_item.direccion}</td>
                 ${meses.map(m=>{
@@ -3109,7 +3109,11 @@ async function renderInmuebles(){
                   if(contrato){
                     const ini=new Date(contrato.fecha_inicio);
                     const fin=contrato.fecha_fin?new Date(contrato.fecha_fin):new Date('2099-12-31');
-                    if(m.date>=ini&&m.date<=fin){color=alertaInm?'#C0392B':'#2D5A3D';border='none';}
+                    if(m.date>=ini&&m.date<=fin){
+                      // rojo SOLO si la alerta de impago cae en este mes
+                      const alertaEsteMes=alertasInm.some(a=>{ if(!a.fecha)return false; const f=new Date(a.fecha); return f.getFullYear()===m.year&&f.getMonth()===m.month; });
+                      color=alertaEsteMes?'#C0392B':'#2D5A3D';border='none';
+                    }
                   }
                   return`<td style="padding:2px 1px"><div style="height:20px;border-radius:3px;background:${color};border:${border}"></div></td>`;
                 }).join('')}

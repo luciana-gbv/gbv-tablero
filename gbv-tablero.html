@@ -628,7 +628,7 @@ async function renderTenencia(targetId){
 
   const anioActual=new Date().getFullYear();
   const anios=[anioActual-2,anioActual-1,anioActual,anioActual+1];
-  let html=`<div class="section-sub">Cargá las hectáreas por tipo de tenencia. El desperdicio se calcula solo (superficie total del campo − los tres tipos).</div>
+  let html=`<div class="section-sub">Cargá las hectáreas por actividad y tenencia. El desperdicio se calcula solo (superficie total − ganadería − agricultura propia/arrendada/aparcería).</div>
     <div class="form-group" style="max-width:200px;margin-bottom:1rem">
       <label class="form-label">Año</label>
       <select class="form-input" onchange="setTenenciaAnio(this.value)">
@@ -636,6 +636,44 @@ async function renderTenencia(targetId){
       </select>
     </div>`;
 
+  // ── Vista de distribución (global + por campo, con porcentajes) ──
+  const CATS_TEN=[
+    {key:'ha_ganaderia',label:'Ganadería',color:'#2D5A3D'},
+    {key:'ha_propias',label:'Agri. propia',color:'#4A7C59'},
+    {key:'ha_arrendadas',label:'Agri. arrendada',color:'#C89B3C'},
+    {key:'ha_aparceria',label:'Agri. aparcería',color:'#8B6D1C'},
+    {key:'ha_desperdicio',label:'Desperdicio',color:'#B4B2A9'},
+  ];
+  const barra=(row)=>{
+    const tot=CATS_TEN.reduce((a,c)=>a+(Number(row[c.key])||0),0);
+    if(tot<=0) return '<div style="font-size:.75rem;color:var(--muted)">sin datos cargados</div>';
+    const segs=CATS_TEN.map(c=>{const v=Number(row[c.key])||0;const pct=v/tot*100;return pct>0?`<div style="width:${pct}%;background:${c.color}" title="${c.label}: ${v.toLocaleString('es-AR')} ha (${pct.toFixed(1)}%)"></div>`:'';}).join('');
+    return `<div style="display:flex;height:22px;border-radius:5px;overflow:hidden;border:0.5px solid var(--border)">${segs}</div>`;
+  };
+  const totalesGlobal={};CATS_TEN.forEach(c=>totalesGlobal[c.key]=(ten||[]).reduce((a,t)=>a+(Number(t[c.key])||0),0));
+  const totGlobal=CATS_TEN.reduce((a,c)=>a+totalesGlobal[c.key],0);
+  html+=`<div class="card" style="margin-bottom:1.25rem">
+    <div class="card-title">Distribución global · ${tenenciaAnio}</div>
+    ${totGlobal>0?`${barra(totalesGlobal)}
+    <div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.75rem">
+      ${CATS_TEN.map(c=>{const v=totalesGlobal[c.key];const pct=v/totGlobal*100;return `<div style="display:flex;align-items:center;gap:.4rem;font-size:.78rem"><span style="width:11px;height:11px;border-radius:3px;background:${c.color};display:inline-block"></span>${c.label}: <strong>${pct.toFixed(1)}%</strong> <span style="color:var(--muted)">(${v.toLocaleString('es-AR',{maximumFractionDigits:0})} ha)</span></div>`;}).join('')}
+    </div>
+    <div style="font-size:.75rem;color:var(--muted);margin-top:.5rem">Total cargado: ${totGlobal.toLocaleString('es-AR',{maximumFractionDigits:0})} ha</div>`
+    :'<div style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem">Todavía no hay datos cargados para este año.</div>'}
+  </div>`;
+  // Por campo (solo los que tienen datos)
+  const camposConDatos=(campos||[]).filter(c=>tenMap[c.id]&&CATS_TEN.reduce((a,cc)=>a+(Number(tenMap[c.id][cc.key])||0),0)>0);
+  if(camposConDatos.length>0){
+    html+=`<div class="card" style="margin-bottom:1.25rem"><div class="card-title">Distribución por campo · ${tenenciaAnio}</div>
+      ${camposConDatos.map(c=>{const row=tenMap[c.id];const tot=CATS_TEN.reduce((a,cc)=>a+(Number(row[cc.key])||0),0);return `<div style="padding:.6rem 0;border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.3rem"><strong>${c.nombre}</strong><span style="color:var(--muted)">${tot.toLocaleString('es-AR',{maximumFractionDigits:0})} ha</span></div>
+        ${barra(row)}
+        <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.35rem">${CATS_TEN.map(cc=>{const v=Number(row[cc.key])||0;const pct=tot?v/tot*100:0;return pct>0?`<span style="font-size:.72rem;color:var(--muted)"><span style="width:8px;height:8px;border-radius:2px;background:${cc.color};display:inline-block;margin-right:3px"></span>${cc.label} ${pct.toFixed(0)}%</span>`:'';}).join('')}</div>
+      </div>`;}).join('')}
+    </div>`;
+  }
+
+  html+=`<div class="card-title" style="margin-bottom:.5rem">Cargar datos</div>`;
   Object.keys(porUnidad).forEach(uid=>{
     html+=`<div class="card" style="margin-bottom:1rem"><div class="card-title">${unidadNombre[uid]||'—'}</div>`;
     porUnidad[uid].forEach(c=>{
@@ -644,9 +682,10 @@ async function renderTenencia(targetId){
       html+=`<div style="border-top:1px solid var(--border);padding:.75rem 0">
         <div style="font-weight:600;margin-bottom:.4rem">${c.nombre} ${sinTotal?'<span style="color:#8B1C1C;font-size:.72rem">⚠ falta cargar la superficie total</span>':`<span style="color:var(--muted);font-size:.75rem;font-weight:400">total ${Number(c.hectareas).toLocaleString('es-AR')} ha</span>`}</div>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end">
-          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Propias (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-prop-${c.id}" value="${t.ha_propias??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
-          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Arrendadas (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-arr-${c.id}" value="${t.ha_arrendadas??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
-          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Aparcería (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-apar-${c.id}" value="${t.ha_aparceria??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">🐄 Ganadería (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-gan-${c.id}" value="${t.ha_ganaderia??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">🌾 Agri. propia (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-prop-${c.id}" value="${t.ha_propias??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">🌾 Agri. arrendada (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-arr-${c.id}" value="${t.ha_arrendadas??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
+          <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">🌾 Agri. aparcería (ha)</label><input type="number" class="form-input" style="width:110px" id="ten-apar-${c.id}" value="${t.ha_aparceria??''}" step="any" oninput="calcDesp('${c.id}',${c.hectareas??'null'})"/></div>
           <div style="font-size:.8rem;padding-bottom:.5rem"><span style="color:var(--muted)">Desperdicio:</span> <strong id="ten-desp-${c.id}">—</strong></div>
           <button class="btn btn-accent btn-sm" style="margin-bottom:.35rem" onclick="guardarTenencia('${c.id}',${c.hectareas??'null'})">Guardar</button>
         </div>
@@ -662,28 +701,30 @@ async function renderTenencia(targetId){
 function calcDesp(campoId, hectareas){
   const el=document.getElementById('ten-desp-'+campoId);
   if(!el)return;
+  const g=parseFloat(document.getElementById('ten-gan-'+campoId)?.value)||0;
   const p=parseFloat(document.getElementById('ten-prop-'+campoId)?.value)||0;
   const a=parseFloat(document.getElementById('ten-arr-'+campoId)?.value)||0;
   const ap=parseFloat(document.getElementById('ten-apar-'+campoId)?.value)||0;
   if(hectareas==null||isNaN(hectareas)){ el.textContent='(falta total)'; el.style.color='#8B1C1C'; return; }
-  const desp=hectareas-(p+a+ap);
+  const desp=hectareas-(g+p+a+ap);
   el.textContent=desp.toLocaleString('es-AR',{maximumFractionDigits:2})+' ha';
   el.style.color = desp<0 ? '#8B1C1C' : 'var(--text)';
   const msg=document.getElementById('ten-msg-'+campoId);
-  if(msg){ msg.textContent = desp<0 ? '⚠ Los tipos superan la superficie total del campo. Revisá los números.' : ''; msg.className = desp<0?'msg-err':''; }
+  if(msg){ msg.textContent = desp<0 ? '⚠ Las actividades superan la superficie total del campo. Revisá los números.' : ''; msg.className = desp<0?'msg-err':''; }
 }
 
 async function guardarTenencia(campoId, hectareas){
+  const g=parseFloat(document.getElementById('ten-gan-'+campoId)?.value)||0;
   const p=parseFloat(document.getElementById('ten-prop-'+campoId)?.value)||0;
   const a=parseFloat(document.getElementById('ten-arr-'+campoId)?.value)||0;
   const ap=parseFloat(document.getElementById('ten-apar-'+campoId)?.value)||0;
   const msg=document.getElementById('ten-msg-'+campoId);
-  if(hectareas!=null && !isNaN(hectareas) && (p+a+ap)>hectareas){
-    if(msg){msg.textContent='⚠ Los tipos superan la superficie total. Corregí antes de guardar.';msg.className='msg-err';}
+  if(hectareas!=null && !isNaN(hectareas) && (g+p+a+ap)>hectareas){
+    if(msg){msg.textContent='⚠ Las actividades superan la superficie total. Corregí antes de guardar.';msg.className='msg-err';}
     return;
   }
-  const desp=(hectareas!=null&&!isNaN(hectareas))?hectareas-(p+a+ap):0;
-  const{error}=await sb.from('tenencia_campos').upsert({campo_id:campoId,anio:tenenciaAnio,ha_propias:p,ha_arrendadas:a,ha_aparceria:ap,ha_desperdicio:desp,updated_at:new Date().toISOString()},{onConflict:'campo_id,anio'});
+  const desp=(hectareas!=null&&!isNaN(hectareas))?hectareas-(g+p+a+ap):0;
+  const{error}=await sb.from('tenencia_campos').upsert({campo_id:campoId,anio:tenenciaAnio,ha_ganaderia:g,ha_propias:p,ha_arrendadas:a,ha_aparceria:ap,ha_desperdicio:desp,updated_at:new Date().toISOString()},{onConflict:'campo_id,anio'});
   if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
   if(msg){msg.textContent='✓ Guardado';msg.className='msg-ok';setTimeout(()=>{if(msg)msg.textContent='';},2500);}
 }

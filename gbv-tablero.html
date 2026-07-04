@@ -2179,6 +2179,13 @@ async function renderRRHH(){
   const evalsPorEmpleado={};
   (evals||[]).forEach(e=>{ if(!evalsPorEmpleado[e.empleado_id]) evalsPorEmpleado[e.empleado_id]=[]; evalsPorEmpleado[e.empleado_id].push(e); });
 
+  // Cantidad de evaluadores asignados por empleado (para el promedio: solo cuando TODOS enviaron)
+  const{data:todosEvalRel}=await sb.from('evaluadores_empleado').select('empleado_id,evaluador_user_id').eq('activo',true);
+  const _setEval={};
+  (todosEvalRel||[]).forEach(r=>{ (_setEval[r.empleado_id]=_setEval[r.empleado_id]||new Set()).add(r.evaluador_user_id); });
+  const evaluadoresCount={};
+  Object.keys(_setEval).forEach(k=>{ evaluadoresCount[k]=_setEval[k].size; });
+
   const pendientes=(todosEmpleados||[]).filter(e=>idsQueEvaluo.has(e.id)&&(!evalsPorEmpleado[e.id]||evalsPorEmpleado[e.id].every(ev=>ev.estado==='borrador'))).length;
 
   main.innerHTML=`
@@ -2284,7 +2291,29 @@ async function renderRRHH(){
       </div>
     </div>
   `;
-  window._rrhhData={misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo,idsQueEvaluo};
+  window._rrhhData={misEmpleados,todosEmpleados,evalsPorEmpleado,periodo,esDirectivo,idsQueEvaluo,evaluadoresCount};
+}
+
+// Promedio de evaluadores: promedia los PUNTAJES de las evaluaciones enviadas y recalcula el bono.
+// Solo se considera "completo" cuando TODOS los evaluadores asignados enviaron.
+function nEsperadosDe(empId){ return (window._rrhhData?.evaluadoresCount||{})[empId] || 1; }
+
+function calcPromedioEval(evs, emp){
+  const enviadas=(evs||[]).filter(e=>e.estado==='enviado'||e.estado==='aprobado');
+  const esperados=nEsperadosDe(emp.id);
+  if(enviadas.length===0) return {completo:false, enviados:0, esperados};
+  if(enviadas.length<esperados) return {completo:false, enviados:enviadas.length, esperados};
+  const avg=arr=>arr.reduce((a,b)=>a+b,0)/arr.length;
+  const pAct=avg(enviadas.map(e=>e.puntaje_actitudinal||0));
+  const pObj=avg(enviadas.map(e=>e.puntaje_objetivos||0));
+  const sueldo=enviadas.map(e=>e.sueldo_al_momento).find(s=>s!=null)||0;
+  const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
+  const sinObjetivos=!(OBJETIVOS_PUESTO[claveObjetivos(emp)]||[]).length;
+  let pctAct=calcPorcentajeActitudinal(pAct,esLider);
+  let pctObj=calcPorcentajeObjetivos(pObj,esLider);
+  if(sinObjetivos){ pctAct=pctAct*2; pctObj=0; }
+  const bono=calcBono(sueldo,pctAct,pctObj,esLider);
+  return {completo:true, enviados:enviadas.length, esperados, pAct, pObj, pctAct, pctObj, bono, esLider};
 }
 
 function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo,idsQueEvaluo){
@@ -2320,10 +2349,13 @@ function renderRRHHEvaluar(empleados,evalsPorEmpleado,periodo,idsQueEvaluo){
         </div>
         ${yoEvaluo&&miEval&&miEval.bono_calculado?`
           <div style="font-size:.78rem;margin-bottom:.5rem">
-            <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Puntaje actitudinal</span><span>${miEval.puntaje_actitudinal} pts → ${miEval.porcentaje_actitudinal}%</span></div>
-            <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Puntaje objetivos</span><span>${miEval.puntaje_objetivos} pts → ${miEval.porcentaje_objetivos}%</span></div>
-            <div style="display:flex;justify-content:space-between;font-weight:500;margin-top:4px"><span style="color:var(--muted)">Bono calculado</span><span style="color:var(--accent)">$${miEval.bono_calculado.toLocaleString('es-AR')}</span></div>
-          </div>`:''}
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Tu puntaje actitudinal</span><span>${miEval.puntaje_actitudinal} pts → ${miEval.porcentaje_actitudinal}%</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Tu puntaje objetivos</span><span>${miEval.puntaje_objetivos} pts → ${miEval.porcentaje_objetivos}%</span></div>
+            <div style="display:flex;justify-content:space-between;font-weight:500;margin-top:4px"><span style="color:var(--muted)">Tu bono calculado</span><span style="color:var(--accent)">$${miEval.bono_calculado.toLocaleString('es-AR',{maximumFractionDigits:0})}</span></div>
+          </div>
+          ${(()=>{const prom=calcPromedioEval(evs,emp);return prom.completo&&prom.esperados>1?`<div style="font-size:.76rem;background:#E9F1EA;border-radius:var(--radius);padding:.45rem .65rem;margin-bottom:.5rem">
+            <div style="display:flex;justify-content:space-between;font-weight:600"><span>Bono final (promedio de ${prom.esperados})</span><span style="color:var(--accent)">$${prom.bono.toLocaleString('es-AR',{maximumFractionDigits:0})}</span></div>
+          </div>`:(prom.enviados>0&&!prom.completo&&prom.esperados>1?`<div style="font-size:.72rem;color:#8B6D1C;margin-bottom:.5rem">⏳ Falta que envíen ${prom.esperados-prom.enviados} evaluador(es) para el promedio final.</div>`:'')})()}`:''}
         ${yoEvaluo
           ? `<button class="btn btn-accent btn-sm" style="width:100%" onclick="abrirEvaluacion('${emp.id}')">
               ${estado==='pendiente'?'Iniciar evaluación':estado==='borrador'?'Continuar evaluación':estado==='enviado'?'Ver evaluación enviada':'Ver evaluación aprobada'}
@@ -2645,14 +2677,17 @@ function renderRRHHResumen(empleados,evalsPorEmpleado,periodo){
         if(ev?.estado==='aprobado') estado='<span class="badge badge-ok">Aprobado</span>';
         else if(ev?.estado==='enviado') estado='<span class="badge badge-info">Enviado</span>';
         else if(ev?.estado==='borrador') estado='<span class="badge badge-na">Borrador</span>';
-        // Promedio si hay 2 evaluaciones
-        const bonoPromedio=evs.length>1?evs.reduce((a,v)=>a+(v.bono_calculado||0),0)/evs.length:ev?.bono_calculado;
+        // Promedio de puntajes (solo cuando todos enviaron); si falta alguno, muestra el estado
+        const prom=calcPromedioEval(evs,e);
+        const bonoCel = prom.completo
+          ? '$'+prom.bono.toLocaleString('es-AR',{maximumFractionDigits:0})+(prom.esperados>1?` <span style="font-size:.68rem;color:var(--muted)">(prom. ${prom.esperados})</span>`:'')
+          : (prom.enviados>0 ? `<span style="font-size:.72rem;color:#8B6D1C">Faltan evaluadores (${prom.enviados}/${prom.esperados})</span>` : '—');
         return`<tr>
           <td><strong>${e.nombre} ${e.apellido||''}</strong></td>
           <td style="color:var(--muted);font-size:.82rem">${e.puesto_descripcion||'—'}</td>
           <td style="color:var(--muted)">${e.area||'—'}</td>
           <td>${estado}</td>
-          <td>${bonoPromedio?'$'+bonoPromedio.toLocaleString('es-AR'):'—'}</td>
+          <td>${bonoCel}</td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>
@@ -2664,9 +2699,28 @@ function renderRRHHAprobar(empleados,evalsPorEmpleado,periodo){
   if(paraAprobar.length===0) return`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay evaluaciones enviadas para aprobar en este período.</div></div>`;
   return`<div class="card"><div class="card-title">Evaluaciones para aprobar · ${periodo.label}</div>
     ${paraAprobar.map(emp=>{
-      const evs=(evalsPorEmpleado[emp.id]||[]).filter(ev=>ev.estado==='enviado');
-      const bonoPromedio=evs.reduce((a,v)=>a+(v.bono_calculado||0),0)/evs.length;
+      const evs=(evalsPorEmpleado[emp.id]||[]).filter(ev=>ev.estado==='enviado'||ev.estado==='aprobado');
+      const prom=calcPromedioEval(evs,emp);
       const esLider=PUESTOS_LIDERAZGO.includes(emp.puesto_codigo);
+      // Detalle de cada evaluador
+      const detalle=evs.map(ev=>`<div style="font-size:.78rem;background:var(--bg);border-radius:var(--radius);padding:.5rem .75rem;margin-bottom:.4rem">
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Actitudinal</span><span>${ev.puntaje_actitudinal} pts → ${ev.porcentaje_actitudinal}%</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Objetivos</span><span>${ev.puntaje_objetivos} pts → ${ev.porcentaje_objetivos}%</span></div>
+        </div>`).join('');
+      if(!prom.completo){
+        return`<div class="puesto-card" style="margin-bottom:.75rem;opacity:.85">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.5rem">
+            <div><div style="font-size:.9rem;font-weight:500">${emp.nombre} ${emp.apellido||''}</div>
+              <div style="font-size:.75rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''}</div></div>
+            <span class="badge badge-na">Faltan evaluadores</span>
+          </div>
+          ${detalle}
+          <div style="font-size:.78rem;color:#8B6D1C;background:#FBF3E0;border-radius:var(--radius);padding:.5rem .75rem">
+            ⏳ Enviaron ${prom.enviados} de ${prom.esperados} evaluadores. El bono se calcula cuando todos completen su evaluación.
+          </div>
+        </div>`;
+      }
+      const bono=prom.bono;
       return`<div class="puesto-card" style="margin-bottom:.75rem">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
           <div>
@@ -2674,17 +2728,19 @@ function renderRRHHAprobar(empleados,evalsPorEmpleado,periodo){
             <div style="font-size:.75rem;color:var(--muted)">${emp.puesto_descripcion||''} · ${emp.area||''}</div>
           </div>
           <div style="text-align:right">
-            <div style="font-size:.85rem;font-weight:500;color:var(--accent)">$${bonoPromedio.toLocaleString('es-AR')}</div>
-            <div style="font-size:.72rem;color:var(--muted)">${evs.length>1?'Promedio de '+evs.length+' evaluaciones':''}</div>
+            <div style="font-size:.85rem;font-weight:500;color:var(--accent)">$${bono.toLocaleString('es-AR',{maximumFractionDigits:0})}</div>
+            <div style="font-size:.72rem;color:var(--muted)">${prom.esperados>1?'Promedio de '+prom.esperados+' evaluadores':''}</div>
           </div>
         </div>
-        ${evs.map(ev=>`<div style="font-size:.78rem;background:var(--bg);border-radius:var(--radius);padding:.5rem .75rem;margin-bottom:.4rem">
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Actitudinal</span><span>${ev.puntaje_actitudinal} pts → ${ev.porcentaje_actitudinal}%</span></div>
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Objetivos</span><span>${ev.puntaje_objetivos} pts → ${ev.porcentaje_objetivos}%</span></div>
-        </div>`).join('')}
+        ${detalle}
+        ${prom.esperados>1?`<div style="font-size:.78rem;background:#E9F1EA;border-radius:var(--radius);padding:.5rem .75rem;margin-bottom:.4rem">
+          <div style="display:flex;justify-content:space-between;font-weight:500"><span>Promedio</span><span></span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Actitudinal (prom.)</span><span>${prom.pAct.toLocaleString('es-AR',{maximumFractionDigits:1})} pts → ${prom.pctAct.toLocaleString('es-AR',{maximumFractionDigits:1})}%</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Objetivos (prom.)</span><span>${prom.pObj.toLocaleString('es-AR',{maximumFractionDigits:1})} pts → ${prom.pctObj.toLocaleString('es-AR',{maximumFractionDigits:1})}%</span></div>
+        </div>`:''}
         <div style="display:flex;gap:.5rem;margin-top:.75rem;flex-wrap:wrap">
-          <button class="btn btn-accent btn-sm" onclick="aprobarBono('${emp.id}','${periodo.periodo}',${bonoPromedio})">✓ Aprobar $${bonoPromedio.toLocaleString('es-AR')}</button>
-          <button class="btn btn-sm" onclick="rectificarBono('${emp.id}','${periodo.periodo}',${bonoPromedio})">Rectificar monto</button>
+          <button class="btn btn-accent btn-sm" onclick="aprobarBono('${emp.id}','${periodo.periodo}',${bono})">✓ Aprobar $${bono.toLocaleString('es-AR',{maximumFractionDigits:0})}</button>
+          <button class="btn btn-sm" onclick="rectificarBono('${emp.id}','${periodo.periodo}',${bono})">Rectificar monto</button>
         </div>
         <div id="msg-aprobar-${emp.id}"></div>
       </div>`;
@@ -2978,10 +3034,15 @@ async function renderInmuebles(){
   const alrt=alertas||[];
 
   const contratosPorInmueble={};
-  cont.forEach(c=>{if(!contratosPorInmueble[c.inmueble_id])contratosPorInmueble[c.inmueble_id]=c;});
+  const _hoyOcup=new Date(); _hoyOcup.setHours(0,0,0,0);
+  // Un contrato ocupa solo si está vigente: sin fecha de fin, o con fecha de fin >= hoy
+  cont.forEach(c=>{
+    const vigente = !c.fecha_fin || new Date(c.fecha_fin) >= _hoyOcup;
+    if(vigente && !contratosPorInmueble[c.inmueble_id]) contratosPorInmueble[c.inmueble_id]=c;
+  });
   const ocupados=inm.filter(i=>contratosPorInmueble[i.id]).length;
   const desocupados=inm.length-ocupados;
-  const ingresoMensual=cont.reduce((a,c)=>a+(c.precio_mensual||0),0);
+  const ingresoMensual=Object.values(contratosPorInmueble).reduce((a,c)=>a+(c.precio_mensual||0),0);
 
   const hoy=new Date();
   const en60=new Date(hoy); en60.setDate(en60.getDate()+60);
@@ -3070,6 +3131,7 @@ async function renderInmuebles(){
     <div class="tab-row">
       <button class="tab-btn active" onclick="inmTab('actual',this)">Situación actual</button>
       <button class="tab-btn" onclick="inmTab('todos',this)">Todos los inmuebles</button>
+      <button class="tab-btn" onclick="inmTab('valor',this)">Valor por tenencia</button>
       ${['programador','coo','operativo'].includes(currentProfile.rol)?`<button class="tab-btn" onclick="inmTab('nueva',this)">+ Reportar alerta</button>`:''}
       ${esGestor?`<button class="tab-btn" onclick="inmTab('archivados',this)">Archivados</button>`:''}
     </div>
@@ -3319,8 +3381,145 @@ function inmTab(tab,btn){
   const panel=document.getElementById('inm-panel');
   if(tab==='actual') panel.innerHTML=renderInmActual(inm,contratosPorInmueble,alrt,esGestor);
   if(tab==='todos') panel.innerHTML=renderInmTodos(inm,cont,alrt);
+  if(tab==='valor') renderInmValor(panel);
   if(tab==='nueva') panel.innerHTML=renderFormAlerta(inm);
   if(tab==='archivados') renderInmArchivados(panel);
+}
+
+
+// ── VALOR POR TENENCIA DE INMUEBLES ──
+async function renderInmValor(panel){
+  if(!panel) panel=document.getElementById('inm-panel');
+  panel.innerHTML='<div class="loading">Cargando...</div>';
+  const esGestor=puedeEditar('inmuebles');
+  const anioActual=new Date().getFullYear();
+  const[{data:inmuebles},{data:valuaciones}]=await Promise.all([
+    sb.from('inmuebles_urbanos').select('*').eq('activo',true).neq('tipo','cochera').order('direccion'),
+    sb.from('valuaciones_inmuebles').select('*')
+  ]);
+  const inm=inmuebles||[];
+  const valsPorInm={};
+  (valuaciones||[]).forEach(v=>{ (valsPorInm[v.inmueble_id]=valsPorInm[v.inmueble_id]||[]).push(v); });
+  Object.values(valsPorInm).forEach(arr=>arr.sort((a,b)=>a.anio-b.anio));
+
+  let totalActual=0, totalCompra=0;
+  inm.forEach(i=>{
+    const vs=valsPorInm[i.id]||[];
+    const vActM2 = vs.length? vs[vs.length-1].valor_m2 : (i.valor_m2_compra||0);
+    const vComM2 = i.valor_m2_compra||0;
+    if(i.metros){ totalActual+=vActM2*i.metros; totalCompra+=vComM2*i.metros; }
+  });
+  const crecCartera = totalCompra>0 ? (totalActual-totalCompra)/totalCompra*100 : null;
+
+  let html=`<div class="metrics-grid" style="margin-bottom:1.25rem">
+    <div class="metric-card"><div class="metric-label">Valor actual de cartera</div><div class="metric-value">${totalActual>0?'US$ '+Math.round(totalActual).toLocaleString('es-AR'):'—'}</div></div>
+    <div class="metric-card"><div class="metric-label">Valor de compra</div><div class="metric-value">${totalCompra>0?'US$ '+Math.round(totalCompra).toLocaleString('es-AR'):'—'}</div></div>
+    <div class="metric-card"><div class="metric-label">Revalorización total</div><div class="metric-value" style="color:${crecCartera>=0?'var(--success)':'var(--danger)'}">${crecCartera!=null?(crecCartera>=0?'+':'')+crecCartera.toFixed(1)+'%':'—'}</div></div>
+  </div>
+  <div style="font-size:.78rem;color:var(--muted);margin-bottom:1rem">Valores en US$ por m². Cargá el año y valor de compra, y las valuaciones por año. El total se calcula con la superficie de cada inmueble.</div>`;
+
+  inm.forEach(i=>{
+    const vs=valsPorInm[i.id]||[];
+    const vActM2 = vs.length? vs[vs.length-1].valor_m2 : (i.valor_m2_compra||0);
+    const vComM2 = i.valor_m2_compra||0;
+    const metros = i.metros||0;
+    const valActTotal = vActM2*metros;
+    const valComTotal = vComM2*metros;
+    const crec = vComM2>0 ? (vActM2-vComM2)/vComM2*100 : null;
+    const puntos=[];
+    if(i.anio_compra && vComM2) puntos.push({anio:i.anio_compra, valor:vComM2});
+    vs.forEach(v=>{ if(!(i.anio_compra===v.anio)) puntos.push({anio:v.anio, valor:v.valor_m2}); });
+    puntos.sort((a,b)=>a.anio-b.anio);
+
+    html+=`<div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:1rem">
+        <div>
+          <div style="font-weight:600">${i.direccion}</div>
+          <div style="font-size:.78rem;color:var(--muted)">${metros?metros.toLocaleString('es-AR')+' m²':'sin superficie cargada'} ${i.localidad?'· '+i.localidad:''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:1.15rem;font-weight:700">${valActTotal>0?'US$ '+Math.round(valActTotal).toLocaleString('es-AR'):'—'}</div>
+          <div style="font-size:.72rem;color:var(--muted)">valor actual estimado</div>
+          ${crec!=null?`<div style="font-size:.8rem;font-weight:600;color:${crec>=0?'var(--success)':'var(--danger)'}">${crec>=0?'+':''}${crec.toFixed(1)}% desde la compra</div>`:''}
+        </div>
+      </div>
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border)">
+        <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Año de compra</label><input type="number" class="form-input" style="width:110px" id="ic-anio-${i.id}" value="${i.anio_compra||''}" ${esGestor?'':'disabled'}/></div>
+        <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.7rem">Valor compra (US$/m²)</label><input type="number" class="form-input" style="width:150px" id="ic-valor-${i.id}" value="${i.valor_m2_compra||''}" step="any" ${esGestor?'':'disabled'}/></div>
+        ${esGestor?`<button class="btn btn-sm" onclick="guardarCompraInm('${i.id}')">Guardar compra</button>`:''}
+        <span style="font-size:.75rem;color:var(--muted)">${valComTotal>0?'Compra total: US$ '+Math.round(valComTotal).toLocaleString('es-AR'):''}</span>
+        <span id="ic-msg-${i.id}" style="font-size:.75rem"></span>
+      </div>`;
+    if(puntos.length>=2){ html+=`<div style="margin-top:.75rem">${miniLineChart(puntos)}</div>`; }
+    html+=`<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border)">
+      <div style="font-size:.78rem;font-weight:500;margin-bottom:.5rem">Valuaciones por año (US$/m²)</div>`;
+    if(vs.length>0){
+      html+=vs.map(v=>`<div style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0">
+        <span style="width:56px;font-size:.82rem">${v.anio}</span>
+        <input type="number" class="form-input" style="width:130px" id="iv-${i.id}-${v.anio}" value="${v.valor_m2}" step="any" ${esGestor?'':'disabled'}/>
+        <span style="font-size:.72rem;color:var(--muted)">US$/m²${metros?' · total US$ '+Math.round(v.valor_m2*metros).toLocaleString('es-AR'):''}</span>
+        ${esGestor?`<button class="btn btn-sm" onclick="guardarValuacion('${i.id}',${v.anio})">Guardar</button><button class="btn btn-sm" style="background:#F4E4E4;color:#8B1C1C" onclick="quitarValuacion('${i.id}',${v.anio})">🗑️</button>`:''}
+      </div>`).join('');
+    } else { html+=`<div style="font-size:.78rem;color:var(--muted)">Sin valuaciones cargadas.</div>`; }
+    if(esGestor){
+      html+=`<div style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem;padding-top:.5rem;border-top:1px dashed var(--border)">
+        <input type="number" class="form-input" style="width:90px" id="iv-add-anio-${i.id}" placeholder="Año" value="${anioActual}"/>
+        <input type="number" class="form-input" style="width:130px" id="iv-add-valor-${i.id}" placeholder="US$/m²" step="any"/>
+        <button class="btn btn-accent btn-sm" onclick="agregarValuacion('${i.id}')">+ Agregar valuación</button>
+      </div>`;
+    }
+    html+=`</div></div>`;
+  });
+  if(inm.length===0) html+=`<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No hay inmuebles cargados.</div></div>`;
+  panel.innerHTML=html;
+}
+
+function miniLineChart(puntos){
+  const W=520,H=140,pad=34;
+  const valores=puntos.map(p=>p.valor), anios=puntos.map(p=>p.anio);
+  const minV=Math.min(...valores), maxV=Math.max(...valores);
+  const minA=Math.min(...anios), maxA=Math.max(...anios);
+  const rangeV=(maxV-minV)||1, rangeA=(maxA-minA)||1;
+  const x=a=>pad+(a-minA)/rangeA*(W-2*pad);
+  const y=v=>H-pad-(v-minV)/rangeV*(H-2*pad);
+  const pathD=puntos.map((p,idx)=>(idx===0?'M':'L')+x(p.anio).toFixed(1)+' '+y(p.valor).toFixed(1)).join(' ');
+  const dots=puntos.map(p=>`<circle cx="${x(p.anio).toFixed(1)}" cy="${y(p.valor).toFixed(1)}" r="3" fill="#2D5A3D"/><text x="${x(p.anio).toFixed(1)}" y="${(y(p.valor)-8).toFixed(1)}" font-size="9" text-anchor="middle" fill="#7A7570">${Math.round(p.valor)}</text>`).join('');
+  const labels=puntos.map(p=>`<text x="${x(p.anio).toFixed(1)}" y="${H-10}" font-size="9" text-anchor="middle" fill="#7A7570">${p.anio}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto"><path d="${pathD}" fill="none" stroke="#2D5A3D" stroke-width="2"/>${dots}${labels}</svg>`;
+}
+
+async function guardarCompraInm(inmId){
+  const anio=parseInt(document.getElementById('ic-anio-'+inmId)?.value)||null;
+  const valor=parseFloat(document.getElementById('ic-valor-'+inmId)?.value)||null;
+  const msg=document.getElementById('ic-msg-'+inmId);
+  const{error}=await sb.from('inmuebles_urbanos').update({anio_compra:anio,valor_m2_compra:valor}).eq('id',inmId);
+  if(error){if(msg){msg.textContent='Error: '+error.message;msg.style.color='#8B1C1C';}return;}
+  renderInmValor();
+}
+
+async function agregarValuacion(inmId){
+  const anio=parseInt(document.getElementById('iv-add-anio-'+inmId)?.value);
+  const valor=parseFloat(document.getElementById('iv-add-valor-'+inmId)?.value);
+  if(!anio){alert('Poné el año.');return;}
+  if(isNaN(valor)){alert('Poné el valor por m².');return;}
+  const{error}=await sb.from('valuaciones_inmuebles').upsert({inmueble_id:inmId,anio,valor_m2:valor,updated_at:new Date().toISOString()},{onConflict:'inmueble_id,anio'});
+  if(error){alert('Error: '+error.message);return;}
+  renderInmValor();
+}
+
+async function guardarValuacion(inmId,anio){
+  const valor=parseFloat(document.getElementById('iv-'+inmId+'-'+anio)?.value);
+  if(isNaN(valor)){alert('Valor inválido');return;}
+  const{error}=await sb.from('valuaciones_inmuebles').upsert({inmueble_id:inmId,anio,valor_m2:valor,updated_at:new Date().toISOString()},{onConflict:'inmueble_id,anio'});
+  if(error){alert('Error: '+error.message);return;}
+  renderInmValor();
+}
+
+async function quitarValuacion(inmId,anio){
+  if(!confirm('¿Quitar esta valuación?'))return;
+  const{error}=await sb.from('valuaciones_inmuebles').delete().eq('inmueble_id',inmId).eq('anio',anio);
+  if(error){alert('Error: '+error.message);return;}
+  renderInmValor();
 }
 
 async function renderInmArchivados(panel){

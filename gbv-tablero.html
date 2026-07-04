@@ -615,6 +615,45 @@ function irACorregir(cat, unidadId){
 let tenenciaAnio=new Date().getFullYear();
 function setTenenciaAnio(v){ tenenciaAnio=parseInt(v); renderTenencia('tenencia-body'); }
 
+const CATS_TEN=[
+  {key:'ha_ganaderia',label:'Ganadería',color:'#2D5A3D'},
+  {key:'ha_propias',label:'Agri. propia',color:'#4A7C59'},
+  {key:'ha_arrendadas',label:'Agri. arrendada',color:'#C89B3C'},
+  {key:'ha_aparceria',label:'Agri. aparcería',color:'#8B6D1C'},
+  {key:'ha_desperdicio',label:'Desperdicio',color:'#B4B2A9'},
+];
+function _barraTen(row){
+  const tot=CATS_TEN.reduce((a,c)=>a+(Number(row[c.key])||0),0);
+  if(tot<=0) return '<div style="font-size:.75rem;color:var(--muted)">sin datos cargados</div>';
+  const segs=CATS_TEN.map(c=>{const v=Number(row[c.key])||0;const pct=v/tot*100;return pct>0?`<div style="width:${pct}%;background:${c.color}" title="${c.label}: ${v.toLocaleString('es-AR')} ha (${pct.toFixed(1)}%)"></div>`:'';}).join('');
+  return `<div style="display:flex;height:22px;border-radius:5px;overflow:hidden;border:0.5px solid var(--border)">${segs}</div>`;
+}
+function distribucionTenenciaHTML(campos, tenRows, anio){
+  const tenMap={}; (tenRows||[]).forEach(t=>tenMap[t.campo_id]=t);
+  const totalesGlobal={};CATS_TEN.forEach(c=>totalesGlobal[c.key]=(tenRows||[]).reduce((a,t)=>a+(Number(t[c.key])||0),0));
+  const totGlobal=CATS_TEN.reduce((a,c)=>a+totalesGlobal[c.key],0);
+  let html=`<div class="card" style="margin-bottom:1.25rem">
+    <div class="card-title">Distribución de hectáreas · ${anio}</div>
+    ${totGlobal>0?`${_barraTen(totalesGlobal)}
+    <div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.75rem">
+      ${CATS_TEN.map(c=>{const v=totalesGlobal[c.key];const pct=v/totGlobal*100;return `<div style="display:flex;align-items:center;gap:.4rem;font-size:.78rem"><span style="width:11px;height:11px;border-radius:3px;background:${c.color};display:inline-block"></span>${c.label}: <strong>${pct.toFixed(1)}%</strong> <span style="color:var(--muted)">(${v.toLocaleString('es-AR',{maximumFractionDigits:0})} ha)</span></div>`;}).join('')}
+    </div>
+    <div style="font-size:.75rem;color:var(--muted);margin-top:.5rem">Total: ${totGlobal.toLocaleString('es-AR',{maximumFractionDigits:0})} ha</div>`
+    :'<div style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem">Todavía no hay datos cargados para este año.</div>'}
+  </div>`;
+  const camposConDatos=(campos||[]).filter(c=>tenMap[c.id]&&CATS_TEN.reduce((a,cc)=>a+(Number(tenMap[c.id][cc.key])||0),0)>0);
+  if(camposConDatos.length>0){
+    html+=`<div class="card" style="margin-bottom:1.25rem"><div class="card-title">Distribución por campo · ${anio}</div>
+      ${camposConDatos.map(c=>{const row=tenMap[c.id];const tot=CATS_TEN.reduce((a,cc)=>a+(Number(row[cc.key])||0),0);return `<div style="padding:.6rem 0;border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.3rem"><strong>${c.nombre}</strong><span style="color:var(--muted)">${tot.toLocaleString('es-AR',{maximumFractionDigits:0})} ha</span></div>
+        ${_barraTen(row)}
+        <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.35rem">${CATS_TEN.map(cc=>{const v=Number(row[cc.key])||0;const pct=tot?v/tot*100:0;return pct>0?`<span style="font-size:.72rem;color:var(--muted)"><span style="width:8px;height:8px;border-radius:2px;background:${cc.color};display:inline-block;margin-right:3px"></span>${cc.label} ${pct.toFixed(0)}%</span>`:'';}).join('')}</div>
+      </div>`;}).join('')}
+    </div>`;
+  }
+  return html;
+}
+
 async function renderTenencia(targetId){
   const cont=document.getElementById(targetId||'main-content');
   if(!cont)return;
@@ -636,43 +675,7 @@ async function renderTenencia(targetId){
       </select>
     </div>`;
 
-  // ── Vista de distribución (global + por campo, con porcentajes) ──
-  const CATS_TEN=[
-    {key:'ha_ganaderia',label:'Ganadería',color:'#2D5A3D'},
-    {key:'ha_propias',label:'Agri. propia',color:'#4A7C59'},
-    {key:'ha_arrendadas',label:'Agri. arrendada',color:'#C89B3C'},
-    {key:'ha_aparceria',label:'Agri. aparcería',color:'#8B6D1C'},
-    {key:'ha_desperdicio',label:'Desperdicio',color:'#B4B2A9'},
-  ];
-  const barra=(row)=>{
-    const tot=CATS_TEN.reduce((a,c)=>a+(Number(row[c.key])||0),0);
-    if(tot<=0) return '<div style="font-size:.75rem;color:var(--muted)">sin datos cargados</div>';
-    const segs=CATS_TEN.map(c=>{const v=Number(row[c.key])||0;const pct=v/tot*100;return pct>0?`<div style="width:${pct}%;background:${c.color}" title="${c.label}: ${v.toLocaleString('es-AR')} ha (${pct.toFixed(1)}%)"></div>`:'';}).join('');
-    return `<div style="display:flex;height:22px;border-radius:5px;overflow:hidden;border:0.5px solid var(--border)">${segs}</div>`;
-  };
-  const totalesGlobal={};CATS_TEN.forEach(c=>totalesGlobal[c.key]=(ten||[]).reduce((a,t)=>a+(Number(t[c.key])||0),0));
-  const totGlobal=CATS_TEN.reduce((a,c)=>a+totalesGlobal[c.key],0);
-  html+=`<div class="card" style="margin-bottom:1.25rem">
-    <div class="card-title">Distribución global · ${tenenciaAnio}</div>
-    ${totGlobal>0?`${barra(totalesGlobal)}
-    <div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.75rem">
-      ${CATS_TEN.map(c=>{const v=totalesGlobal[c.key];const pct=v/totGlobal*100;return `<div style="display:flex;align-items:center;gap:.4rem;font-size:.78rem"><span style="width:11px;height:11px;border-radius:3px;background:${c.color};display:inline-block"></span>${c.label}: <strong>${pct.toFixed(1)}%</strong> <span style="color:var(--muted)">(${v.toLocaleString('es-AR',{maximumFractionDigits:0})} ha)</span></div>`;}).join('')}
-    </div>
-    <div style="font-size:.75rem;color:var(--muted);margin-top:.5rem">Total cargado: ${totGlobal.toLocaleString('es-AR',{maximumFractionDigits:0})} ha</div>`
-    :'<div style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem">Todavía no hay datos cargados para este año.</div>'}
-  </div>`;
-  // Por campo (solo los que tienen datos)
-  const camposConDatos=(campos||[]).filter(c=>tenMap[c.id]&&CATS_TEN.reduce((a,cc)=>a+(Number(tenMap[c.id][cc.key])||0),0)>0);
-  if(camposConDatos.length>0){
-    html+=`<div class="card" style="margin-bottom:1.25rem"><div class="card-title">Distribución por campo · ${tenenciaAnio}</div>
-      ${camposConDatos.map(c=>{const row=tenMap[c.id];const tot=CATS_TEN.reduce((a,cc)=>a+(Number(row[cc.key])||0),0);return `<div style="padding:.6rem 0;border-top:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.3rem"><strong>${c.nombre}</strong><span style="color:var(--muted)">${tot.toLocaleString('es-AR',{maximumFractionDigits:0})} ha</span></div>
-        ${barra(row)}
-        <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.35rem">${CATS_TEN.map(cc=>{const v=Number(row[cc.key])||0;const pct=tot?v/tot*100:0;return pct>0?`<span style="font-size:.72rem;color:var(--muted)"><span style="width:8px;height:8px;border-radius:2px;background:${cc.color};display:inline-block;margin-right:3px"></span>${cc.label} ${pct.toFixed(0)}%</span>`:'';}).join('')}</div>
-      </div>`;}).join('')}
-    </div>`;
-  }
-
+  html += distribucionTenenciaHTML(campos, ten, tenenciaAnio);
   html+=`<div class="card-title" style="margin-bottom:.5rem">Cargar datos</div>`;
   Object.keys(porUnidad).forEach(uid=>{
     html+=`<div class="card" style="margin-bottom:1rem"><div class="card-title">${unidadNombre[uid]||'—'}</div>`;
@@ -751,6 +754,8 @@ async function renderResumen(){
   const{data:entries}=await sb.from('entries')
     .select('*,indicadores(nombre,categoria),profiles(nombre,apellido),campos(nombre)')
     .order('created_at',{ascending:false}).limit(20);
+  const anioTen=new Date().getFullYear();
+  const{data:tenResumen}=await sb.from('tenencia_campos').select('*').eq('anio',anioTen);
   const thisMonth=entries?entries.filter(e=>new Date(e.created_at)>new Date(new Date().setDate(1))).length:0;
   const main=document.getElementById('main-content');
   main.innerHTML=`
@@ -798,7 +803,8 @@ async function renderResumen(){
           <span style="font-size:.78rem;font-weight:500;min-width:80px;text-align:right">${has>0?has.toLocaleString('es-AR')+' ha':'—'}</span>
         </div>`;
       }).join('')}
-    </div>`;
+    </div>
+    ${distribucionTenenciaHTML(allCampos, tenResumen, anioTen)}`;
 }
 
 // ── CARGA ──

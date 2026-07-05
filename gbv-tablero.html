@@ -1065,6 +1065,24 @@ async function loadIndicatorsPanel(){
     }
   }
 
+  // Marcar campos ya cargados en indicadores "por campo" (valor o "sin dato")
+  window._porCampoCargado={};
+  const porCampoInds=filtered.filter(i=>i.por_campo);
+  if(porCampoInds.length>0){
+    const perByInd={};
+    porCampoInds.forEach(i=>{ perByInd[i.id]=getPeriodoFijo(i); });
+    const{data:pcE}=await sb.from('entries')
+      .select('indicador_id,campo_id,valor,no_disponible,periodo_fecha')
+      .in('indicador_id',porCampoInds.map(i=>i.id))
+      .eq('unidad_negocio_id',selectedUnidad)
+      .not('campo_id','is',null);
+    (pcE||[]).forEach(e=>{
+      if(e.periodo_fecha===perByInd[e.indicador_id]){
+        window._porCampoCargado[e.indicador_id+'_'+e.campo_id]={valor:e.valor,no_disponible:e.no_disponible};
+      }
+    });
+  }
+
   if(filtered.length===0){panel.innerHTML='<div class="card"><div style="text-align:center;padding:2rem;color:var(--muted)">No tenés indicadores para cargar en esta categoría y unidad.</div></div>';return;}
   // Limpiar cache al cambiar categoría
   _varCache={};
@@ -1101,7 +1119,11 @@ async function loadIndicatorsPanel(){
   const estaCargado=(ind)=>{
     if(ind.nombre==='Consumos de luz por medidor') return luzCompleto;
     if(ind.nombre==='Kilometraje por camioneta') return kmCompleto;
-    if(ind.por_campo) return false; // por campo: no se ocultan por ahora
+    if(ind.por_campo){
+      const camposU=allCampos.filter(c=>c.unidad_negocio_id===selectedUnidad);
+      if(camposU.length===0) return false;
+      return camposU.every(c=>window._porCampoCargado&&window._porCampoCargado[ind.id+'_'+c.id]);
+    }
     return cargadosSet.has(ind.id+'_'+getPeriodoFijo(ind));
   };
   const pendientes=filtered.filter(i=>!estaCargado(i));
@@ -1444,7 +1466,18 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
       </div>
       ${ind.formula?`<div class="ind-formula">${ind.formula}</div>`:''}
       ${camposUnidad.length===0?`<div class="alert alert-info">No hay campos cargados para esta unidad.</div>`:
-        camposUnidad.map(campo=>`
+        camposUnidad.map(campo=>{
+          const cg=window._porCampoCargado&&window._porCampoCargado[id+'_'+campo.id];
+          if(cg){
+            const txt = cg.no_disponible ? '<span style="color:#8B6D1C;font-weight:600">Sin dato disponible</span>' : `<strong>${Number(cg.valor).toLocaleString('es-AR',{maximumFractionDigits:2})}</strong> ${ind.unidad_medida||''}`;
+            return `<div class="sub-entry-card" style="border-color:#A8D5B5;background:#F4FAF6">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <div class="sub-entry-title">📍 ${campo.nombre} <span style="color:var(--success);font-size:.72rem;font-weight:600">✓ cargado</span></div>
+                <div style="font-size:.85rem">${txt}</div>
+              </div>
+            </div>`;
+          }
+          return `
         <div class="sub-entry-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
             <div class="sub-entry-title">📍 ${campo.nombre}</div>
@@ -1457,7 +1490,7 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
             <button class="btn btn-sm" style="background:#F4EEE0;color:#8B6D1C" title="El análisis no está disponible" onclick="guardarEntryCampoND('${id}','${campo.id}','${unidadId}','${periodoFijo}')">Sin dato</button>
           </div>
           <div id="msg-campo-${id}-${campo.id}"></div>
-        </div>`).join('')}
+        </div>`;}).join('')}
     </div>`;
   }
 
@@ -1666,18 +1699,16 @@ async function guardarEntryCampo(indId,campoId,unidadId,periodoFijo){
   const inp=document.getElementById(`val-campo-${indId}-${campoId}`);
   const msgEl=document.getElementById(`msg-campo-${indId}-${campoId}`);
   const valor=parseFloat(inp?.value);
-  if(!valor){if(msgEl){msgEl.textContent='Ingresá un valor.';msgEl.className='msg-err';}return;}
+  if(isNaN(valor)){if(msgEl){msgEl.textContent='Ingresá un valor.';msgEl.className='msg-err';}return;}
   if(!periodoFijo){if(msgEl){msgEl.textContent='Error: período no definido.';msgEl.className='msg-err';}return;}
   const{error}=await sb.from('entries').insert({
     indicador_id:indId,campo_id:campoId,unidad_negocio_id:unidadId||null,
     user_id:currentUser.id,valor,periodo_fecha:periodoFijo
   });
-  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
-  else{
-    if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
-    if(inp)inp.value='';
-    setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
-  }
+  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}return;}
+  window._porCampoCargado=window._porCampoCargado||{};
+  window._porCampoCargado[indId+'_'+campoId]={valor,no_disponible:false};
+  _pintarCampoCargado(indId,campoId);
 }
 
 async function guardarEntryCampoND(indId,campoId,unidadId,periodoFijo){
@@ -1687,13 +1718,27 @@ async function guardarEntryCampoND(indId,campoId,unidadId,periodoFijo){
     indicador_id:indId,campo_id:campoId,unidad_negocio_id:unidadId||null,
     user_id:currentUser.id,valor:null,no_disponible:true,periodo_fecha:periodoFijo
   });
-  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
-  else{
-    if(msgEl){msgEl.textContent='✓ Marcado como dato no disponible';msgEl.className='msg-ok';}
-    const inp=document.getElementById(`val-campo-${indId}-${campoId}`);
-    if(inp){inp.value='';inp.disabled=true;inp.placeholder='No disponible';}
-    setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}return;}
+  window._porCampoCargado=window._porCampoCargado||{};
+  window._porCampoCargado[indId+'_'+campoId]={valor:null,no_disponible:true};
+  _pintarCampoCargado(indId,campoId);
+}
+
+function _pintarCampoCargado(indId,campoId){
+  const inp=document.getElementById(`val-campo-${indId}-${campoId}`);
+  const card=inp?inp.closest('.sub-entry-card'):null;
+  const cg=window._porCampoCargado[indId+'_'+campoId];
+  if(card&&cg){
+    const campo=allCampos.find(c=>c.id===campoId);
+    const ind=allIndicadores.find(i=>i.id===indId);
+    const txt=cg.no_disponible?'<span style="color:#8B6D1C;font-weight:600">Sin dato disponible</span>':`<strong>${Number(cg.valor).toLocaleString('es-AR',{maximumFractionDigits:2})}</strong> ${ind?.unidad_medida||''}`;
+    card.style.borderColor='#A8D5B5';card.style.background='#F4FAF6';
+    card.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><div class="sub-entry-title">📍 ${campo?.nombre||''} <span style="color:var(--success);font-size:.72rem;font-weight:600">✓ cargado</span></div><div style="font-size:.85rem">${txt}</div></div>`;
   }
+  // Si ya están todos los campos de la unidad cargados, el indicador pasa abajo
+  const camposU=allCampos.filter(c=>c.unidad_negocio_id===selectedUnidad);
+  const todos=camposU.length>0&&camposU.every(c=>window._porCampoCargado[indId+'_'+c.id]);
+  if(todos) setTimeout(()=>loadIndicatorsPanel(),700);
 }
 
 async function guardarEntry(indId,unidadId,periodoFijo){

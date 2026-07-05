@@ -615,6 +615,33 @@ function irACorregir(cat, unidadId){
 let tenenciaAnio=new Date().getFullYear();
 function setTenenciaAnio(v){ tenenciaAnio=parseInt(v); renderTenencia('tenencia-body'); }
 
+function tablaEcologiaHTML(inds, entries, campos){
+  if(!inds || inds.length===0) return '';
+  // último dato por indicador+campo (por fecha de período)
+  const latest={};
+  (entries||[]).slice().sort((a,b)=>(''+(b.periodo_fecha||'')).localeCompare(''+(a.periodo_fecha||''))).forEach(e=>{
+    const k=e.indicador_id+'_'+e.campo_id;
+    if(!(k in latest)) latest[k]=e;
+  });
+  const camposConDato=(campos||[]).filter(c=>inds.some(i=>latest[i.id+'_'+c.id]));
+  if(camposConDato.length===0) return '';
+  const umLabel={ppm:'ppm',porcentaje:'%',numero:''};
+  const nombreCorto=(n)=>{ let x=n.replace('Fertilización ','').replace('del suelo','').trim(); return x.charAt(0).toUpperCase()+x.slice(1); };
+  const celda=(indId,campoId)=>{
+    const e=latest[indId+'_'+campoId];
+    if(!e) return '<span style="color:var(--muted)">s/d</span>';
+    if(e.no_disponible) return '<span style="color:#8B6D1C;font-size:.78rem">No disponible</span>';
+    return `<strong>${Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2})}</strong>`;
+  };
+  return `<div class="card" style="margin-bottom:1.25rem"><div class="card-title">Análisis de suelo por campo</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Campo</th>${inds.map(i=>`<th>${nombreCorto(i.nombre)}${umLabel[i.unidad_medida]?' ('+umLabel[i.unidad_medida]+')':''}</th>`).join('')}</tr></thead>
+      <tbody>${camposConDato.map(c=>`<tr><td><strong>${c.nombre}</strong></td>${inds.map(i=>`<td>${celda(i.id,c.id)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>
+    <div style="font-size:.72rem;color:var(--muted);margin-top:.5rem">s/d = sin dato cargado · "No disponible" = el análisis existe pero ese dato no está</div>
+  </div>`;
+}
+
 const CATS_TEN=[
   {key:'ha_ganaderia',label:'Ganadería',color:'#2D5A3D'},
   {key:'ha_propias',label:'Agri. propia',color:'#4A7C59'},
@@ -756,6 +783,13 @@ async function renderResumen(){
     .order('created_at',{ascending:false}).limit(20);
   const anioTen=new Date().getFullYear();
   const{data:tenResumen}=await sb.from('tenencia_campos').select('*').eq('anio',anioTen);
+  // Ecología (fósforo, materia orgánica, PH) por campo
+  const{data:ecoInds}=await sb.from('indicadores').select('id,nombre,unidad_medida').eq('categoria','ecologia').eq('activo',true).order('nombre');
+  let ecoEntries=[];
+  if(ecoInds&&ecoInds.length){
+    const{data:ee}=await sb.from('entries').select('indicador_id,campo_id,valor,no_disponible,periodo_fecha').in('indicador_id',ecoInds.map(i=>i.id)).not('campo_id','is',null);
+    ecoEntries=ee||[];
+  }
   const thisMonth=entries?entries.filter(e=>new Date(e.created_at)>new Date(new Date().setDate(1))).length:0;
   const main=document.getElementById('main-content');
   main.innerHTML=`
@@ -804,7 +838,8 @@ async function renderResumen(){
         </div>`;
       }).join('')}
     </div>
-    ${distribucionTenenciaHTML(allCampos, tenResumen, anioTen)}`;
+    ${distribucionTenenciaHTML(allCampos, tenResumen, anioTen)}
+    ${tablaEcologiaHTML(ecoInds, ecoEntries, allCampos)}`;
 }
 
 // ── CARGA ──
@@ -1419,6 +1454,7 @@ function renderIndCard(ind,unidad,hasTotal,medidores,rodados,rodadosBsAs,varsCac
             <input type="number" class="form-input" id="val-campo-${id}-${campo.id}" placeholder="${ind.unidad_medida==='hectareas'?'Hectáreas':'Valor'}" step="any" style="flex:1"/>
             <div style="font-size:.78rem;background:#E8F0EB;color:var(--accent);padding:.4rem .75rem;border-radius:var(--radius);white-space:nowrap">📅 ${periodoLabel}</div>
             <button class="btn btn-accent btn-sm" onclick="guardarEntryCampo('${id}','${campo.id}','${unidadId}','${periodoFijo}')">Guardar</button>
+            <button class="btn btn-sm" style="background:#F4EEE0;color:#8B6D1C" title="El análisis no está disponible" onclick="guardarEntryCampoND('${id}','${campo.id}','${unidadId}','${periodoFijo}')">Sin dato</button>
           </div>
           <div id="msg-campo-${id}-${campo.id}"></div>
         </div>`).join('')}
@@ -1640,6 +1676,22 @@ async function guardarEntryCampo(indId,campoId,unidadId,periodoFijo){
   else{
     if(msgEl){msgEl.textContent='✓ Guardado';msgEl.className='msg-ok';}
     if(inp)inp.value='';
+    setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  }
+}
+
+async function guardarEntryCampoND(indId,campoId,unidadId,periodoFijo){
+  const msgEl=document.getElementById(`msg-campo-${indId}-${campoId}`);
+  if(!periodoFijo){if(msgEl){msgEl.textContent='Error: período no definido.';msgEl.className='msg-err';}return;}
+  const{error}=await sb.from('entries').insert({
+    indicador_id:indId,campo_id:campoId,unidad_negocio_id:unidadId||null,
+    user_id:currentUser.id,valor:null,no_disponible:true,periodo_fecha:periodoFijo
+  });
+  if(error){if(msgEl){msgEl.textContent='Error: '+error.message;msgEl.className='msg-err';}}
+  else{
+    if(msgEl){msgEl.textContent='✓ Marcado como dato no disponible';msgEl.className='msg-ok';}
+    const inp=document.getElementById(`val-campo-${indId}-${campoId}`);
+    if(inp){inp.value='';inp.disabled=true;inp.placeholder='No disponible';}
     setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
   }
 }

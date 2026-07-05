@@ -4330,7 +4330,7 @@ async function renderAdmin(){
   const main=document.getElementById('main-content');
   const[{data:profiles},{data:rodados},{data:medidores},{data:puestos}]=await Promise.all([
     sb.from('profiles').select('*').order('apellido'),
-    sb.from('rodados').select('*,campos(nombre),unidades_negocio(nombre)').eq('activo',true),
+    sb.from('rodados').select('*,campos(nombre),unidades_negocio(nombre)').order('patente'),
     sb.from('medidores_luz').select('*,campos(nombre)').eq('activo',true),
     sb.from('puestos').select('*,campos(nombre)').eq('activo',true)
   ]);
@@ -4508,16 +4508,84 @@ async function verHistoricoHa(campoId,nombre){
 }
 
 function renderAdminRodados(rodados){
-  return`<div class="card"><div class="card-title">Rodados (${rodados.length})</div>
+  const activos=rodados.filter(r=>r.activo!==false);
+  const archivados=rodados.filter(r=>r.activo===false);
+  return`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+      <div class="card-title" style="margin:0">Rodados activos (${activos.length})</div>
+      <button class="btn btn-accent btn-sm" onclick="abrirModalRodado()">+ Agregar rodado</button>
+    </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Patente</th><th>Descripción</th><th>Campo</th><th>Unidad de negocio</th></tr></thead>
-      <tbody>${rodados.map(r=>`<tr>
+      <thead><tr><th>Patente</th><th>Descripción</th><th>Campo</th><th>Unidad de negocio</th><th></th></tr></thead>
+      <tbody>${activos.length?activos.map(r=>`<tr>
         <td><strong>${r.patente}</strong></td>
         <td style="color:var(--muted);font-size:.82rem">${r.descripcion||'—'}</td>
         <td>${r.campos?.nombre||'—'}</td>
         <td>${r.unidades_negocio?.nombre||'—'}</td>
-      </tr>`).join('')}</tbody>
-    </table></div></div>`;
+        <td style="text-align:right"><button class="btn btn-sm" style="background:#F4E4E4;color:#8B1C1C" onclick="archivarRodado('${r.id}','${(r.patente||'').replace(/'/g,'')}')">Archivar</button></td>
+      </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">No hay rodados activos.</td></tr>'}</tbody>
+    </table></div>
+    ${archivados.length?`<details style="margin-top:1rem"><summary style="cursor:pointer;font-size:.82rem;color:var(--muted)">Archivados / vendidos (${archivados.length})</summary>
+      <div class="table-wrap" style="margin-top:.5rem"><table>
+        <thead><tr><th>Patente</th><th>Descripción</th><th>Unidad</th><th></th></tr></thead>
+        <tbody>${archivados.map(r=>`<tr style="opacity:.7">
+          <td>${r.patente}</td><td style="color:var(--muted)">${r.descripcion||'—'}</td><td>${r.unidades_negocio?.nombre||'—'}</td>
+          <td style="text-align:right"><button class="btn btn-sm" onclick="restaurarRodado('${r.id}')">Restaurar</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div></details>`:''}
+  </div>
+  <div id="modal-rodado" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center;padding:1rem">
+    <div style="background:var(--surface,#fff);border-radius:12px;padding:1.5rem;width:100%;max-width:440px">
+      <div style="font-size:1rem;font-weight:600;margin-bottom:1rem">Agregar rodado</div>
+      <div class="form-group"><label class="form-label">Patente *</label><input type="text" class="form-input" id="rod-patente" placeholder="Ej: AB 123 CD"/></div>
+      <div class="form-group"><label class="form-label">Descripción</label><input type="text" class="form-input" id="rod-desc" placeholder="Ej: Toyota Hilux blanca 2023"/></div>
+      <div class="form-group"><label class="form-label">Unidad de negocio *</label><select class="form-select" id="rod-unidad">${allUnidades.map(u=>`<option value="${u.id}">${u.nombre}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Campo (opcional)</label><select class="form-select" id="rod-campo"><option value="">— Ninguno (Administración BA) —</option>${allCampos.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+      <div id="msg-rod" style="font-size:.8rem;margin-bottom:.75rem"></div>
+      <div style="display:flex;gap:.75rem"><button class="btn btn-accent" onclick="guardarRodado()">Guardar</button><button class="btn" onclick="document.getElementById('modal-rodado').style.display='none'">Cancelar</button></div>
+    </div>
+  </div>`;
+}
+
+function abrirModalRodado(){
+  const p=document.getElementById('rod-patente'); if(p)p.value='';
+  const d=document.getElementById('rod-desc'); if(d)d.value='';
+  const c=document.getElementById('rod-campo'); if(c)c.value='';
+  const m=document.getElementById('msg-rod'); if(m){m.textContent='';m.className='';}
+  document.getElementById('modal-rodado').style.display='flex';
+}
+
+async function recargarRodados(){
+  const{data:rodados}=await sb.from('rodados').select('*,campos(nombre),unidades_negocio(nombre)').order('patente');
+  if(window._adminData) window._adminData.rodados=rodados;
+  const panel=document.getElementById('admin-panel');
+  if(panel) panel.innerHTML=renderAdminRodados(rodados||[]);
+}
+
+async function guardarRodado(){
+  const patente=document.getElementById('rod-patente').value.trim();
+  const descripcion=document.getElementById('rod-desc').value.trim();
+  const unidad=document.getElementById('rod-unidad').value;
+  const campo=document.getElementById('rod-campo').value||null;
+  const msg=document.getElementById('msg-rod');
+  if(!patente){if(msg){msg.textContent='La patente es obligatoria.';msg.className='msg-err';}return;}
+  const{error}=await sb.from('rodados').insert({patente,descripcion,unidad_negocio_id:unidad,campo_id:campo,activo:true});
+  if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
+  document.getElementById('modal-rodado').style.display='none';
+  recargarRodados();
+}
+
+async function archivarRodado(id,patente){
+  if(!confirm('¿Archivar el rodado '+patente+'? Ya no aparecerá para cargar kilometraje. Podés restaurarlo cuando quieras.'))return;
+  const{error}=await sb.from('rodados').update({activo:false}).eq('id',id);
+  if(error){alert('Error: '+error.message);return;}
+  recargarRodados();
+}
+
+async function restaurarRodado(id){
+  const{error}=await sb.from('rodados').update({activo:true}).eq('id',id);
+  if(error){alert('Error: '+error.message);return;}
+  recargarRodados();
 }
 
 function renderAdminMedidores(medidores){

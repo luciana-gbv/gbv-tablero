@@ -790,6 +790,8 @@ async function renderResumen(){
     const{data:ee}=await sb.from('entries').select('indicador_id,campo_id,valor,no_disponible,periodo_fecha').in('indicador_id',ecoInds.map(i=>i.id)).not('campo_id','is',null);
     ecoEntries=ee||[];
   }
+  const{data:alertasInd}=await sb.from('alertas_indicador').select('*');
+  const alertaMap={}; (alertasInd||[]).forEach(a=>{alertaMap[a.indicador_id+'_'+a.unidad_negocio_id]=a;});
   const thisMonth=entries?entries.filter(e=>new Date(e.created_at)>new Date(new Date().setDate(1))).length:0;
   const main=document.getElementById('main-content');
   main.innerHTML=`
@@ -817,7 +819,7 @@ async function renderResumen(){
           return`<tr>
           <td>${e.indicadores?.nombre||'—'}</td>
           <td><span class="badge badge-na">${CAT_LABELS[e.indicadores?.categoria]||'—'}</span></td>
-          <td><strong>${e.valor!==null?e.valor:'—'}</strong></td>
+          <td><strong>${e.valor!==null?e.valor:'—'}</strong>${(()=>{const a=alertaMap[e.indicador_id+'_'+e.unidad_negocio_id];if(!a||e.valor==null)return'';if(a.alerta_min!=null&&e.valor<a.alerta_min)return` <span title="Por debajo del mínimo deseado (${a.alerta_min})" style="cursor:help">⚠️</span>`;if(a.alerta_max!=null&&e.valor>a.alerta_max)return` <span title="Por encima del máximo deseado (${a.alerta_max})" style="cursor:help">⚠️</span>`;return'';})()}</td>
           <td>${estadoBadge}${e.visto_por&&e.visto_por.length>0?'<div style="font-size:.66rem;color:var(--accent);margin-top:.2rem">👁 Visto por dirección</div>':''}</td>
           <td>${e.campos?.nombre||'—'}</td>
           <td>${(e.profiles?.nombre||'')+' '+(e.profiles?.apellido||'')}</td>
@@ -4441,6 +4443,7 @@ async function renderAdmin(){
       <button class="tab-btn" onclick="adminTab('rodados',this)">Rodados</button>
       <button class="tab-btn" onclick="adminTab('medidores',this)">Medidores</button>
       <button class="tab-btn" onclick="adminTab('puestos-admin',this)">Instalaciones</button>
+      <button class="tab-btn" onclick="adminTab('alertas',this)">Alertas de indicadores</button>
     </div>
     <div id="admin-panel"></div>`;
   document.getElementById('admin-panel').innerHTML=renderAdminUsuarios(profiles||[]);
@@ -4456,6 +4459,75 @@ function adminTab(tab,btn){
   if(tab==='rodados')panel.innerHTML=renderAdminRodados(rodados||[]);
   if(tab==='medidores')panel.innerHTML=renderAdminMedidores(medidores||[]);
   if(tab==='puestos-admin')panel.innerHTML=renderAdminPuestosTable(puestos||[]);
+  if(tab==='alertas')renderAdminAlertas(panel);
+}
+
+let _alertasData=null;
+async function renderAdminAlertas(panel){
+  if(!panel)panel=document.getElementById('admin-panel');
+  panel.innerHTML='<div class="loading">Cargando...</div>';
+  const[{data:inds},{data:iu},{data:alertas}]=await Promise.all([
+    sb.from('indicadores').select('id,nombre,categoria,unidad_medida').eq('activo',true).order('nombre'),
+    sb.from('indicador_unidades').select('indicador_id,unidad_negocio_id'),
+    sb.from('alertas_indicador').select('*')
+  ]);
+  _alertasData={inds:inds||[],iu:iu||[],alertas:alertas||[]};
+  renderAlertasLista('');
+}
+
+function renderAlertasLista(filtro){
+  const panel=document.getElementById('admin-panel');
+  if(!panel||!_alertasData)return;
+  const{inds,iu,alertas}=_alertasData;
+  const unidadesPorInd={};
+  iu.forEach(r=>{(unidadesPorInd[r.indicador_id]=unidadesPorInd[r.indicador_id]||[]).push(r.unidad_negocio_id);});
+  const alertaMap={};
+  alertas.forEach(a=>{alertaMap[a.indicador_id+'_'+a.unidad_negocio_id]=a;});
+  const unidadNombre={};allUnidades.forEach(u=>unidadNombre[u.id]=u.nombre);
+  const t=normalizarTexto(filtro||'');
+  const lista=inds.filter(i=>!t||normalizarTexto(i.nombre).includes(t));
+  const tieneAlerta=(indId)=>alertas.some(a=>a.indicador_id===indId&&(a.alerta_min!=null||a.alerta_max!=null));
+  let html=`<div class="card">
+    <div class="card-title">Alertas de indicadores</div>
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">Definí el mínimo y/o máximo deseado por indicador y unidad. Si un valor cargado se sale del rango, aparece ⚠️ en el Resumen e Históricos. Dejá vacío lo que no aplique.</div>
+    <input type="text" class="form-input" placeholder="🔍 Buscar indicador..." oninput="renderAlertasLista(this.value)" value="${(filtro||'').replace(/"/g,'&quot;')}" style="margin-bottom:1rem;max-width:420px"/>
+    ${lista.map(i=>{
+      const unidades=unidadesPorInd[i.id]||[];
+      return `<details style="border-top:1px solid var(--border);padding:.5rem 0">
+        <summary style="cursor:pointer;font-size:.9rem;display:flex;justify-content:space-between;align-items:center;gap:1rem">
+          <span>${i.nombre} <span style="color:var(--muted);font-size:.75rem">· ${i.unidad_medida||''}</span></span>
+          ${tieneAlerta(i.id)?'<span class="badge badge-ok" style="font-size:.68rem">con alerta</span>':'<span style="color:var(--muted);font-size:.7rem">sin alerta</span>'}
+        </summary>
+        <div style="padding:.6rem 0 .3rem">
+          ${unidades.length===0?'<div style="font-size:.78rem;color:var(--muted)">Este indicador no tiene unidades asignadas.</div>':
+          unidades.map(uid=>{
+            const a=alertaMap[i.id+'_'+uid]||{};
+            return `<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.3rem 0">
+              <span style="min-width:130px;font-size:.82rem">${unidadNombre[uid]||'—'}</span>
+              <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.68rem">Mínimo</label><input type="number" class="form-input" style="width:110px" id="al-min-${i.id}-${uid}" value="${a.alerta_min??''}" step="any" placeholder="sin mín"/></div>
+              <div class="form-group" style="margin:0"><label class="form-label" style="font-size:.68rem">Máximo</label><input type="number" class="form-input" style="width:110px" id="al-max-${i.id}-${uid}" value="${a.alerta_max??''}" step="any" placeholder="sin máx"/></div>
+              <button class="btn btn-accent btn-sm" onclick="guardarAlerta('${i.id}','${uid}')">Guardar</button>
+              <span id="al-msg-${i.id}-${uid}" style="font-size:.75rem"></span>
+            </div>`;
+          }).join('')}
+        </div>
+      </details>`;
+    }).join('')}
+    ${lista.length===0?'<div style="text-align:center;color:var(--muted);padding:1rem">Sin resultados.</div>':''}
+  </div>`;
+  panel.innerHTML=html;
+}
+
+async function guardarAlerta(indId,uid){
+  const minV=document.getElementById(`al-min-${indId}-${uid}`)?.value;
+  const maxV=document.getElementById(`al-max-${indId}-${uid}`)?.value;
+  const msg=document.getElementById(`al-msg-${indId}-${uid}`);
+  const vals={indicador_id:indId,unidad_negocio_id:uid,alerta_min:minV===''?null:parseFloat(minV),alerta_max:maxV===''?null:parseFloat(maxV),updated_at:new Date().toISOString()};
+  const{error}=await sb.from('alertas_indicador').upsert(vals,{onConflict:'indicador_id,unidad_negocio_id'});
+  if(error){if(msg){msg.textContent='Error: '+error.message;msg.style.color='#8B1C1C';}return;}
+  const ex=_alertasData.alertas.find(a=>a.indicador_id===indId&&a.unidad_negocio_id===uid);
+  if(ex)Object.assign(ex,vals); else _alertasData.alertas.push(vals);
+  if(msg){msg.textContent='✓ Guardado';msg.style.color='var(--success)';setTimeout(()=>{if(msg)msg.textContent='';},2000);}
 }
 
 function renderAdminUsuarios(profiles){

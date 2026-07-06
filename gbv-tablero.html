@@ -4031,7 +4031,9 @@ async function confirmarBajaPuesto(){
 async function renderHistorico(){
   const main=document.getElementById('main-content');
   const anioActual=new Date().getFullYear();
-  const anios=[anioActual, anioActual-1, anioActual-2, anioActual-3];
+  const{data:_aniosRows}=await sb.from('entries').select('periodo_fecha');
+  const aniosConDatos=[...new Set((_aniosRows||[]).map(e=>e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').getFullYear():null).filter(Boolean))];
+  const anios=[...new Set([anioActual,anioActual-1,anioActual-2,anioActual-3,...aniosConDatos])].sort((a,b)=>b-a);
   const esDirectivo=['programador','directorio','coo','directorio_lectura'].includes(currentProfile.rol);
 
   main.innerHTML=`
@@ -4043,10 +4045,10 @@ async function renderHistorico(){
       <div class="card-title">📄 Informe anual completo</div>
       <div style="display:flex;align-items:flex-end;gap:1rem;flex-wrap:wrap">
         <div class="form-group" style="margin:0">
-          <label class="form-label">Año</label>
-          <select class="form-select" id="informe-anio" style="width:auto">
-            ${anios.map(a=>`<option value="${a}">${a}</option>`).join('')}
-          </select>
+          <label class="form-label">Año(s) — elegí uno o varios</label>
+          <div style="display:flex;gap:.75rem;flex-wrap:wrap;padding:.4rem 0">
+            ${anios.map(a=>`<label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer"><input type="checkbox" class="informe-anio-cb" value="${a}" ${aniosConDatos.includes(a)?'checked':''}/> ${a}${aniosConDatos.includes(a)?'':' <span style="color:var(--muted);font-size:.7rem">(sin datos)</span>'}</label>`).join('')}
+          </div>
         </div>
         <button class="btn btn-accent" onclick="descargarInformePDF()">⬇ Descargar PDF</button>
         <button class="btn" onclick="descargarInformeExcel()">⬇ Descargar Excel</button>
@@ -4299,20 +4301,34 @@ async function loadHistVariables(indId,entries){
 }
 
 async function getEntriesAnio(anio){
+  return getEntriesAnios([anio]);
+}
+
+function getAniosInforme(){
+  return [...document.querySelectorAll('.informe-anio-cb:checked')].map(cb=>parseInt(cb.value));
+}
+
+async function getEntriesAnios(anios){
+  if(!anios||anios.length===0) return [];
+  const min=Math.min(...anios), max=Math.max(...anios);
   const{data}=await sb.from('entries')
     .select('*,indicadores(nombre,categoria,unidad_medida,alerta_min,alerta_max),unidades_negocio(nombre),campos(nombre),profiles(nombre,apellido)')
-    .gte('periodo_fecha',`${anio}-01-01`)
-    .lte('periodo_fecha',`${anio}-12-31`)
+    .gte('periodo_fecha',`${min}-01-01`)
+    .lte('periodo_fecha',`${max}-12-31`)
     .order('periodo_fecha',{ascending:false});
-  return data||[];
+  const set=new Set(anios.map(Number));
+  return (data||[]).filter(e=>e.periodo_fecha&&set.has(new Date(e.periodo_fecha+'T12:00:00').getFullYear()));
 }
 
 async function descargarInformePDF(){
-  const anio=document.getElementById('informe-anio').value;
+  const aniosSel=getAniosInforme();
+  if(aniosSel.length===0){alert('Elegí al menos un año.');return;}
+  const anio=aniosSel.slice().sort().join(', ');
   const btn=event.target;
   btn.textContent='Generando...';btn.disabled=true;
 
-  const entries=await getEntriesAnio(anio);
+  const entries=await getEntriesAnios(aniosSel);
+  if(entries.length===0){alert('No hay datos para el/los año(s) elegido(s).');btn.textContent='⬇ Descargar PDF';btn.disabled=false;return;}
 
   // Agrupar por categoría
   const porCat={};
@@ -4325,7 +4341,7 @@ async function descargarInformePDF(){
   // Construir HTML para imprimir
   const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%232D5A3D'/><text y='.9em' font-size='70' x='15' fill='white'>🌿</text></svg>"/>
-<title>GBV · Informe Anual ${anio}</title>
+<title>GBV · Informe ${anio}</title>
   <style>
     body{font-family:Arial,sans-serif;font-size:11px;color:#1A1916;margin:2cm}
     h1{font-size:22px;color:#2D5A3D;margin-bottom:4px}
@@ -4340,7 +4356,7 @@ async function descargarInformePDF(){
     @media print{body{margin:1.5cm}}
   </style></head><body>
   <div class="header">
-    <div><h1>GBV · Informe Anual ${anio}</h1>
+    <div><h1>GBV · Informe ${anio}</h1>
     <div class="fecha">Generado el ${new Date().toLocaleDateString('es-AR',{day:'2-digit',month:'long',year:'numeric'})} · ${entries.length} registros</div></div>
   </div>
   ${Object.entries(porCat).map(([cat,rows])=>`
@@ -4377,17 +4393,20 @@ async function descargarInformePDF(){
 }
 
 async function descargarInformeExcel(){
-  const anio=document.getElementById('informe-anio').value;
+  const aniosSel=getAniosInforme();
+  if(aniosSel.length===0){alert('Elegí al menos un año.');return;}
+  const anio=aniosSel.slice().sort().join(', ');
   const btn=event.target;
   btn.textContent='Generando...';btn.disabled=true;
 
-  const entries=await getEntriesAnio(anio);
+  const entries=await getEntriesAnios(aniosSel);
+  if(entries.length===0){alert('No hay datos para el/los año(s) elegido(s).');btn.textContent='⬇ Descargar Excel';btn.disabled=false;return;}
 
   // Construir CSV (compatible con Excel y Google Sheets)
   const BOM='\uFEFF';
   const sep=',';
   const filas=[
-    ['GBV · Informe Anual '+anio],
+    ['GBV · Informe '+anio],
     ['Generado el '+new Date().toLocaleDateString('es-AR')],
     [],
     ['Categoría','Indicador','Período','Valor','Unidad de medida','Unidad/Campo','Cargado por','Estado','Alerta mín','Alerta máx']
@@ -4808,12 +4827,16 @@ let hacCampoActual=null; // datos crudos parseados del excel antes de confirmar
 async function renderHacienda(){
   const main=document.getElementById('main-content');
   const puedeCargarHac=puedeEditar('hacienda');
+  const puedePesos=['programador','coo','operativo'].includes(currentProfile.rol);
+  const{data:pesosH}=await sb.from('pesos_hacienda').select('*');
+  window._pesosHacienda={};(pesosH||[]).forEach(p=>{window._pesosHacienda[p.categoria+'_'+p.unidad_negocio_id]=p.kg_promedio;});
   main.innerHTML=`
     <div class="section-heading">Planillas de hacienda</div>
     <div class="section-sub">Carga mensual y consulta histórica de existencia ganadera</div>
     <div class="tab-row">
       ${puedeCargarHac?`<button class="tab-btn active" onclick="hacSwitchTab('cargar',this)">↑ Cargar planilla</button>`:''}
       <button class="tab-btn ${puedeCargarHac?'':'active'}" onclick="hacSwitchTab('consultar',this)">🔍 Consultar histórico</button>
+      <button class="tab-btn" onclick="hacSwitchTab('pesos',this)">⚖️ Pesos (kg vivo)</button>
     </div>
     <div id="hac-content"></div>
 
@@ -4837,6 +4860,42 @@ function hacSwitchTab(tab,btn){
   }
   if(tab==='cargar')renderHacCargar();
   if(tab==='consultar')renderHacConsultar();
+  if(tab==='pesos')renderHacPesos();
+}
+
+let _pesosUnidadSel=null;
+async function renderHacPesos(){
+  const el=document.getElementById('hac-content');
+  const puede=['programador','coo','operativo'].includes(currentProfile.rol);
+  el.innerHTML='<div class="loading">Cargando...</div>';
+  const{data:pesos}=await sb.from('pesos_hacienda').select('*');
+  window._pesosHacienda={};(pesos||[]).forEach(p=>{window._pesosHacienda[p.categoria+'_'+p.unidad_negocio_id]=p.kg_promedio;});
+  const pesoMap={};(pesos||[]).forEach(p=>{pesoMap[p.categoria+'_'+p.unidad_negocio_id]=p.kg_promedio;});
+  const nombresU=[...new Set(Object.values(HAC_CAMPO_UNIDAD))];
+  const unidadesHac=allUnidades.filter(u=>nombresU.some(n=>normalizarTexto(n)===normalizarTexto(u.nombre)));
+  if(!_pesosUnidadSel&&unidadesHac.length)_pesosUnidadSel=unidadesHac[0].id;
+  el.innerHTML=`<div class="card">
+    <div class="card-title">Pesos promedio (kg vivo) por categoría y unidad</div>
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">Definí el kg promedio de cada categoría por unidad de negocio. Se usa para calcular el "Kg vivo" en la planilla. Dejá vacío lo que no aplique.${puede?'':' (Solo lectura)'}</div>
+    <div class="form-group" style="max-width:260px;margin-bottom:1rem"><label class="form-label">Unidad de negocio</label>
+      <select class="form-select" onchange="setPesosUnidad(this.value)">${unidadesHac.map(u=>`<option value="${u.id}" ${u.id===_pesosUnidadSel?'selected':''}>${u.nombre}</option>`).join('')}</select></div>
+    <div class="table-wrap"><table><thead><tr><th>Categoría</th><th style="text-align:right">Kg promedio</th></tr></thead><tbody>
+      ${HAC_CATEGORIAS.map((cat,idx)=>{const val=pesoMap[cat.label+'_'+_pesosUnidadSel];return `<tr><td>${cat.label} <span style="color:var(--muted);font-size:.72rem">· ${cat.grupo}</span></td>
+        <td style="text-align:right"><input type="number" class="form-input" style="width:120px" id="peso-idx-${idx}" value="${val??''}" step="any" ${puede?'':'disabled'} placeholder="—"/>${puede?`<button class="btn btn-sm" style="margin-left:.4rem" onclick="guardarPeso(${idx})">Guardar</button>`:''} <span id="peso-msg-${idx}" style="font-size:.72rem"></span></td></tr>`;}).join('')}
+    </tbody></table></div>
+  </div>`;
+}
+function setPesosUnidad(uid){_pesosUnidadSel=uid;renderHacPesos();}
+async function guardarPeso(idx){
+  const cat=HAC_CATEGORIAS[idx];
+  const inp=document.getElementById('peso-idx-'+idx);
+  const msg=document.getElementById('peso-msg-'+idx);
+  const val=inp?.value;
+  const{error}=await sb.from('pesos_hacienda').upsert({categoria:cat.label,unidad_negocio_id:_pesosUnidadSel,kg_promedio:val===''?null:parseFloat(val),updated_at:new Date().toISOString()},{onConflict:'categoria,unidad_negocio_id'});
+  if(error){if(msg){msg.textContent='Error';msg.style.color='#8B1C1C';}return;}
+  window._pesosHacienda=window._pesosHacienda||{};
+  window._pesosHacienda[cat.label+'_'+_pesosUnidadSel]=val===''?null:parseFloat(val);
+  if(msg){msg.textContent='✓';msg.style.color='var(--success)';setTimeout(()=>{if(msg)msg.textContent='';},2000);}
 }
 
 // ──────────────── CARGAR PLANILLA ────────────────
@@ -5315,26 +5374,41 @@ function hacRenderComparativa(regs,comentarios,periodosSel){
 }
 
 // Planilla completa: filas = categorías (agrupadas por grupo, con subtotales), columnas = campos
+// Mapeo fijo: campo de hacienda (texto) -> unidad de negocio (nombre)
+const HAC_CAMPO_UNIDAD={'Aguara':'Oeste','Pto. Flores':'Corrientes','Rincon del Chañar':'Corrientes','San Juan':'Oeste','Tandil':'Tandil','Las Celmiras':'Oeste'};
+function _unidadIdDeCampo(campoTxt){
+  const nombreU=HAC_CAMPO_UNIDAD[campoTxt];
+  if(!nombreU)return null;
+  const u=allUnidades.find(x=>normalizarTexto(x.nombre)===normalizarTexto(nombreU));
+  return u?u.id:null;
+}
+function _pesoDe(categoria,campoTxt){
+  const uid=_unidadIdDeCampo(campoTxt);
+  if(!uid||!window._pesosHacienda)return null;
+  const p=window._pesosHacienda[categoria+'_'+uid];
+  return (p==null)?null:p;
+}
+
 function hacPlanillaTabla(regsSub,campos){
   const m={};campos.forEach(c=>m[c]={});
   regsSub.forEach(r=>{const k=r.grupo+'|'+r.categoria;m[r.campo][k]=(m[r.campo][k]||0)+r.cantidad;});
   const grupos=[...new Set(HAC_CATEGORIAS.map(c=>c.grupo))];
-  const totalCampo={};campos.forEach(c=>totalCampo[c]=0);let granTotal=0;
-  let html=`<table><thead><tr><th>Categoría</th>${campos.map(c=>`<th style="text-align:right">${c}</th>`).join('')}<th style="text-align:right">Total</th></tr></thead><tbody>`;
+  const totalCampo={};campos.forEach(c=>totalCampo[c]=0);let granTotal=0;let granKg=0;
+  let html=`<table><thead><tr><th>Categoría</th>${campos.map(c=>`<th style="text-align:right">${c}</th>`).join('')}<th style="text-align:right">Total</th><th style="text-align:right;background:#EAF2ED;color:var(--accent)">Kg vivo</th></tr></thead><tbody>`;
   grupos.forEach(g=>{
     const catsG=HAC_CATEGORIAS.filter(c=>c.grupo===g);
-    const subtot={};campos.forEach(c=>subtot[c]=0);
-    html+=`<tr style="background:var(--bg)"><td colspan="${campos.length+2}" style="font-weight:600;font-size:.78rem">${g}</td></tr>`;
+    const subtot={};campos.forEach(c=>subtot[c]=0);let subKg=0;
+    html+=`<tr style="background:var(--bg)"><td colspan="${campos.length+3}" style="font-weight:600;font-size:.78rem">${g}</td></tr>`;
     catsG.forEach(cat=>{
-      const k=g+'|'+cat.label;let rowTot=0;
-      const celdas=campos.map(c=>{const v=m[c][k]||0;subtot[c]+=v;totalCampo[c]+=v;rowTot+=v;return`<td style="text-align:right">${v?v.toLocaleString('es-AR'):'—'}</td>`;}).join('');
-      granTotal+=rowTot;
-      html+=`<tr><td style="padding-left:1rem">${cat.label}</td>${celdas}<td style="text-align:right">${rowTot?rowTot.toLocaleString('es-AR'):'—'}</td></tr>`;
+      const k=g+'|'+cat.label;let rowTot=0;let rowKg=0;
+      const celdas=campos.map(c=>{const v=m[c][k]||0;subtot[c]+=v;totalCampo[c]+=v;rowTot+=v;const peso=_pesoDe(cat.label,c);if(peso)rowKg+=v*peso;return`<td style="text-align:right">${v?v.toLocaleString('es-AR'):'—'}</td>`;}).join('');
+      granTotal+=rowTot;granKg+=rowKg;subKg+=rowKg;
+      html+=`<tr><td style="padding-left:1rem">${cat.label}</td>${celdas}<td style="text-align:right">${rowTot?rowTot.toLocaleString('es-AR'):'—'}</td><td style="text-align:right;color:var(--accent)">${rowKg?Math.round(rowKg).toLocaleString('es-AR'):'—'}</td></tr>`;
     });
     const subTotG=campos.reduce((a,c)=>a+subtot[c],0);
-    html+=`<tr style="color:var(--muted);font-weight:500"><td style="padding-left:1rem">Subtotal ${g}</td>${campos.map(c=>`<td style="text-align:right">${subtot[c].toLocaleString('es-AR')}</td>`).join('')}<td style="text-align:right">${subTotG.toLocaleString('es-AR')}</td></tr>`;
+    html+=`<tr style="color:var(--muted);font-weight:500"><td style="padding-left:1rem">Subtotal ${g}</td>${campos.map(c=>`<td style="text-align:right">${subtot[c].toLocaleString('es-AR')}</td>`).join('')}<td style="text-align:right">${subTotG.toLocaleString('es-AR')}</td><td style="text-align:right;color:var(--accent)">${subKg?Math.round(subKg).toLocaleString('es-AR'):'—'}</td></tr>`;
   });
-  html+=`<tr style="border-top:2px solid var(--border);font-weight:700"><td>TOTAL</td>${campos.map(c=>`<td style="text-align:right">${totalCampo[c].toLocaleString('es-AR')}</td>`).join('')}<td style="text-align:right">${granTotal.toLocaleString('es-AR')}</td></tr>`;
+  html+=`<tr style="border-top:2px solid var(--border);font-weight:700"><td>TOTAL</td>${campos.map(c=>`<td style="text-align:right">${totalCampo[c].toLocaleString('es-AR')}</td>`).join('')}<td style="text-align:right">${granTotal.toLocaleString('es-AR')}</td><td style="text-align:right;color:var(--accent)">${granKg?Math.round(granKg).toLocaleString('es-AR')+' kg':'—'}</td></tr>`;
   return html+'</tbody></table>';
 }
 

@@ -501,42 +501,93 @@ const CATS_APROBACION=['productivo_global','productivo_cria','productivo_recria'
 async function renderAprobaciones(targetId){
   const cont=document.getElementById(targetId||'main-content');
   if(!cont)return;
+  window._aprobTarget=targetId||'main-content';
   cont.innerHTML='<div class="loading">Cargando...</div>';
   const{data:profs}=await sb.from('profiles').select('id,nombre,apellido');
   const nombreDe={}; (profs||[]).forEach(p=>nombreDe[p.id]=((p.nombre||'')+' '+(p.apellido||'')).trim()||'—');
-  const{data:pend}=await sb.from('entries')
-    .select('id,valor,valor_texto,periodo_fecha,created_at,user_id,estado,indicadores!inner(nombre,categoria,unidad_medida),unidades_negocio(nombre)')
-    .eq('estado','pendiente')
-    .in('indicadores.categoria',CATS_APROBACION)
-    .order('created_at',{ascending:true});
-  const lista=pend||[];
-
-  let html=`<div class="section-sub">Revisá y aprobá los indicadores de campo y ganadería cargados</div>`;
-  if(lista.length===0){
-    html+=`<div class="card"><div style="text-align:center;padding:2.5rem;color:var(--muted)"><div style="font-size:2rem;margin-bottom:.5rem">✓</div><div>No hay indicadores pendientes de aprobación.</div></div></div>`;
-    cont.innerHTML=html; return;
+  const[{data:pend},{data:aprob},{data:alertas}]=await Promise.all([
+    sb.from('entries').select('id,valor,valor_texto,periodo_fecha,created_at,user_id,indicador_id,unidad_negocio_id,campo_id,indicadores!inner(nombre,categoria,unidad_medida,formula),unidades_negocio(nombre),campos(nombre)').eq('estado','pendiente').in('indicadores.categoria',CATS_APROBACION).order('created_at',{ascending:true}),
+    sb.from('entries').select('id,valor,valor_texto,periodo_fecha,user_id,indicador_id,unidad_negocio_id,campo_id,indicadores!inner(nombre,categoria,unidad_medida),unidades_negocio(nombre),campos(nombre)').eq('estado','aprobado').in('indicadores.categoria',CATS_APROBACION).order('periodo_fecha',{ascending:false}),
+    sb.from('alertas_indicador').select('*')
+  ]);
+  const alertaMap={};(alertas||[]).forEach(a=>alertaMap[a.indicador_id+'_'+a.unidad_negocio_id]=a);
+  const pendIds=(pend||[]).map(e=>e.id);
+  let varsPorEntry={};
+  if(pendIds.length){
+    const{data:evs}=await sb.from('entry_variables').select('entry_id,clave,valor').in('entry_id',pendIds);
+    (evs||[]).forEach(ev=>{(varsPorEntry[ev.entry_id]=varsPorEntry[ev.entry_id]||[]).push(ev);});
   }
-  html+=`<div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem">${lista.length} pendiente${lista.length>1?'s':''} de aprobación</div>`;
-  html+=lista.map(e=>{
-    const val=e.valor!=null?Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):(e.valor_texto||'—');
-    const um=e.indicadores?.unidad_medida||'';
-    const uni=e.unidades_negocio?.nombre||'—';
-    const fecha=new Date(e.created_at).toLocaleDateString('es-AR');
-    return `<div class="card" id="aprob-card-${e.id}" style="margin-bottom:.6rem">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
-        <div>
-          <div style="font-weight:600">${e.indicadores?.nombre||'—'}</div>
-          <div style="font-size:.78rem;color:var(--muted);margin-top:.15rem">${uni} · período ${e.periodo_fecha} · cargó ${nombreDe[e.user_id]||'—'} el ${fecha}</div>
+  const rangoTxt=(e)=>{
+    const a=alertaMap[e.indicador_id+'_'+e.unidad_negocio_id];
+    if(!a||e.valor==null||(a.alerta_min==null&&a.alerta_max==null))return '';
+    let fuera=false,det='';
+    if(a.alerta_min!=null&&e.valor<a.alerta_min){fuera=true;det='mín '+a.alerta_min;}
+    else if(a.alerta_max!=null&&e.valor>a.alerta_max){fuera=true;det='máx '+a.alerta_max;}
+    return fuera
+      ? `<div style="color:#8B1C1C;font-size:.76rem;font-weight:600;margin-top:.15rem">⚠️ Fuera de rango (${det})</div>`
+      : `<div style="color:var(--success);font-size:.76rem;font-weight:600;margin-top:.15rem">✓ Dentro del rango</div>`;
+  };
+  const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const mesLabel=(pf)=>{ if(!pf)return 'Sin período'; const d=new Date(pf+'T12:00:00'); return MESES[d.getMonth()]+' '+d.getFullYear(); };
+
+  let html=`<div class="section-sub">Revisá y aprobá los indicadores cargados. Cada uno muestra el detalle de cómo se calculó.</div>`;
+
+  const lista=pend||[];
+  html+=`<div class="card-title" style="margin-bottom:.5rem">⬆ Pendientes de aprobar (${lista.length})</div>`;
+  if(lista.length===0){
+    html+=`<div class="card"><div style="text-align:center;padding:1.5rem;color:var(--muted)">✓ No hay indicadores pendientes de aprobación.</div></div>`;
+  } else {
+    html+=lista.map(e=>{
+      const val=e.valor!=null?Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):(e.valor_texto||'—');
+      const um=e.indicadores?.unidad_medida||'';
+      const uni=e.unidades_negocio?.nombre||'—';
+      const campo=e.campos?.nombre;
+      const fecha=new Date(e.created_at).toLocaleDateString('es-AR');
+      const vars=varsPorEntry[e.id]||[];
+      const varsHtml=vars.length?`<div style="background:var(--bg);border-radius:var(--radius);padding:.5rem .75rem;margin-top:.5rem;font-size:.8rem">
+        <div style="color:var(--muted);margin-bottom:.25rem">Datos cargados:</div>
+        ${vars.map(v=>`<div style="display:flex;justify-content:space-between;padding:.1rem 0"><span>${v.clave}</span><strong>${v.valor!=null?Number(v.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):'—'}</strong></div>`).join('')}
+      </div>`:'';
+      return `<div class="card" id="aprob-card-${e.id}" style="margin-bottom:.6rem">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div style="font-weight:600">${e.indicadores?.nombre||'—'}</div>
+            ${e.indicadores?.formula?`<div style="font-size:.76rem;color:var(--muted);font-style:italic;margin-top:.15rem">Fórmula: ${e.indicadores.formula}</div>`:''}
+            <div style="font-size:.78rem;color:var(--muted);margin-top:.25rem">${uni}${campo?' · '+campo:''} · período ${e.periodo_fecha} · cargó ${nombreDe[e.user_id]||'—'} el ${fecha}</div>
+          </div>
+          <div style="text-align:right;white-space:nowrap">
+            <div style="font-size:1.3rem;font-weight:700;color:var(--accent)">${val} <span style="font-size:.7rem;color:var(--muted);font-weight:400">${um}</span></div>
+            ${rangoTxt(e)}
+          </div>
         </div>
-        <div style="font-size:1.3rem;font-weight:700;color:var(--accent);white-space:nowrap">${val} <span style="font-size:.7rem;color:var(--muted);font-weight:400">${um}</span></div>
-      </div>
-      <div id="aprob-msg-${e.id}" style="font-size:.8rem;margin-top:.4rem"></div>
-      <div style="display:flex;gap:.5rem;margin-top:.6rem">
-        <button class="btn btn-accent btn-sm" onclick="aprobarEntry('${e.id}')">✓ Aprobar</button>
-        <button class="btn btn-sm" style="background:#F4E4E4;color:#8B1C1C" onclick="rechazarEntry('${e.id}')">✗ Rechazar</button>
-      </div>
-    </div>`;
-  }).join('');
+        ${varsHtml}
+        <div id="aprob-msg-${e.id}" style="font-size:.8rem;margin-top:.4rem"></div>
+        <div style="display:flex;gap:.5rem;margin-top:.6rem">
+          <button class="btn btn-accent btn-sm" onclick="aprobarEntry('${e.id}')">✓ Aprobar</button>
+          <button class="btn btn-sm" style="background:#F4E4E4;color:#8B1C1C" onclick="rechazarEntry('${e.id}')">✗ Rechazar</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const aprobList=aprob||[];
+  html+=`<div class="card-title" style="margin:1.5rem 0 .5rem">⬇ Aprobados (${aprobList.length})</div>`;
+  if(aprobList.length===0){
+    html+=`<div style="font-size:.82rem;color:var(--muted)">Todavía no hay indicadores aprobados.</div>`;
+  } else {
+    const porMes={};
+    aprobList.forEach(e=>{ const m=mesLabel(e.periodo_fecha); (porMes[m]=porMes[m]||[]).push(e); });
+    const mesesOrden=Object.keys(porMes).sort((a,b)=>(porMes[b][0].periodo_fecha||'').localeCompare(porMes[a][0].periodo_fecha||''));
+    html+=mesesOrden.map(m=>`<details class="card" style="margin-bottom:.5rem"><summary style="cursor:pointer;font-weight:500">${m} <span style="color:var(--muted);font-size:.8rem;font-weight:400">· ${porMes[m].length} aprobado${porMes[m].length>1?'s':''}</span></summary>
+      <div style="margin-top:.5rem">${porMes[m].map(e=>{
+        const val=e.valor!=null?Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):(e.valor_texto||'—');
+        return `<div style="display:flex;justify-content:space-between;gap:1rem;padding:.35rem 0;border-top:1px solid var(--border);font-size:.82rem">
+          <span style="color:var(--success)">✓ ${e.indicadores?.nombre||'—'} <span style="color:var(--muted)">· ${e.unidades_negocio?.nombre||''}${e.campos?.nombre?' · '+e.campos.nombre:''}</span></span>
+          <strong style="white-space:nowrap">${val} ${e.indicadores?.unidad_medida||''}</strong>
+        </div>`;
+      }).join('')}</div>
+    </details>`).join('');
+  }
   cont.innerHTML=html;
 }
 
@@ -544,8 +595,7 @@ async function aprobarEntry(id){
   const msg=document.getElementById('aprob-msg-'+id);
   const{error}=await sb.from('entries').update({estado:'aprobado',aprobado_por:currentUser.id,aprobado_en:new Date().toISOString(),motivo_rechazo:null}).eq('id',id);
   if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
-  const card=document.getElementById('aprob-card-'+id);
-  if(card){card.style.transition='opacity .3s';card.style.opacity='0';setTimeout(()=>card.remove(),300);}
+  renderAprobaciones(window._aprobTarget||'aprob-body');
 }
 
 async function rechazarEntry(id){
@@ -555,8 +605,7 @@ async function rechazarEntry(id){
   const msg=document.getElementById('aprob-msg-'+id);
   const{error}=await sb.from('entries').update({estado:'rechazado',aprobado_por:currentUser.id,aprobado_en:new Date().toISOString(),motivo_rechazo:motivo.trim()}).eq('id',id);
   if(error){if(msg){msg.textContent='Error: '+error.message;msg.className='msg-err';}return;}
-  const card=document.getElementById('aprob-card-'+id);
-  if(card){card.style.transition='opacity .3s';card.style.opacity='0';setTimeout(()=>card.remove(),300);}
+  renderAprobaciones(window._aprobTarget||'aprob-body');
 }
 
 // ── PARA CORREGIR (cada persona ve sus indicadores rechazados) ──

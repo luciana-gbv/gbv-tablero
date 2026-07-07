@@ -7,8 +7,10 @@
 <title>GBV · Tablero de Comando</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script>if(typeof supabase==='undefined'){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/scr'+'ipt>');}</script>
 <script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>if(typeof XLSX==='undefined'){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"><\/scr'+'ipt>');}</script>
 <style>
 :root{--bg:#F5F3EE;--surface:#FFFFFF;--border:#E2DDD6;--text:#1A1916;--muted:#7A7570;--accent:#2D5A3D;--danger:#C0392B;--warning:#D4890A;--success:#2D5A3D;--info:#1A4A6B;--font-disp:'DM Serif Display',serif;--font-body:'DM Sans',sans-serif;--radius:10px;--shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 12px rgba(0,0,0,0.04)}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -163,6 +165,10 @@ tr:hover td{background:var(--bg)}
 </div>
 
 <script>
+if(typeof supabase==='undefined'){
+  document.getElementById('main-content').innerHTML='<div style="padding:2rem;text-align:center;color:#5a3d2b"><div style="font-size:1.1rem;margin-bottom:.5rem">No se pudo cargar una librería necesaria</div><div style="font-size:.85rem;color:#888;margin-bottom:1rem">Suele ser un problema de red momentáneo.</div><button onclick="location.reload()" style="padding:.5rem 1.25rem;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer">Reintentar</button></div>';
+  throw new Error('supabase no cargó');
+}
 const SUPA_URL='https://qwnlwpvpmlthshtofkzr.supabase.co';
 const SUPA_KEY='sb_publishable_Wcf8KQPElBsMKmRF3kaD8Q_o7k5dXGT';
 const sb=supabase.createClient(SUPA_URL,SUPA_KEY);

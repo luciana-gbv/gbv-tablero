@@ -847,19 +847,49 @@ async function renderResumen(){
   }
   const{data:alertasInd}=await sb.from('alertas_indicador').select('*');
   const alertaMap={}; (alertasInd||[]).forEach(a=>{alertaMap[a.indicador_id+'_'+a.unidad_negocio_id]=a;});
+  // Todos los indicadores cargados para la tabla del Directorio (incluye rechazados)
+  const{data:todosInds}=await sb.from('entries')
+    .select('valor,valor_texto,estado,periodo_fecha,created_at,user_id,indicador_id,unidad_negocio_id,campo_id,indicadores(nombre,categoria,unidad_medida),unidades_negocio(nombre),campos(nombre),profiles!entries_user_id_fkey(nombre,apellido)')
+    .order('created_at',{ascending:false});
+  // Quedarse con la carga MÁS RECIENTE por indicador+unidad+campo+período: una corrección reemplaza al rechazo
+  const _vistoKey=new Set(); const _dedup=[];
+  (todosInds||[]).forEach(e=>{
+    const k=e.indicador_id+'_'+(e.unidad_negocio_id||'')+'_'+(e.campo_id||'')+'_'+(e.periodo_fecha||'');
+    if(!_vistoKey.has(k)){ _vistoKey.add(k); _dedup.push(e); }
+  });
+  window._resumenInds=_dedup;
+  window._resumenAlertas=alertaMap;
+  window._resumenNombres={};
+  (todosInds||[]).forEach(e=>{ if(e.profiles) window._resumenNombres[e.user_id]=((e.profiles.nombre||'')+' '+(e.profiles.apellido||'')).trim(); });
   const thisMonth=entries?entries.filter(e=>new Date(e.created_at)>new Date(new Date().setDate(1))).length:0;
   const main=document.getElementById('main-content');
   main.innerHTML=`
     <div class="section-heading">Resumen</div>
     <div class="section-sub">Vista general · ${new Date().toLocaleDateString('es-AR',{month:'long',year:'numeric'})}</div>
     ${currentProfile.rol==='programador'?`<div style="margin-bottom:1rem"><button class="btn btn-sm" id="btn-recordatorios" onclick="enviarRecordatoriosAhora()">📧 Enviar recordatorios por email ahora</button> <span id="recordatorios-msg" style="font-size:.8rem;margin-left:.5rem"></span></div>`:''}
+    ${tablaIndicadoresResumenHTML()}
     <div class="metrics-grid">
       <div class="metric-card"><div class="metric-label">Unidades de negocio</div><div class="metric-value">${allUnidades.length}</div></div>
       <div class="metric-card"><div class="metric-label">Campos</div><div class="metric-value">${allCampos.length}</div></div>
       <div class="metric-card"><div class="metric-label">Indicadores</div><div class="metric-value">${allIndicadores.length}</div></div>
       <div class="metric-card"><div class="metric-label">Cargas este mes</div><div class="metric-value">${thisMonth}</div><div class="metric-sub up">registros</div></div>
     </div>
-    <div class="card" style="margin-bottom:1rem">
+    <div class="card">
+      <div class="card-title">Unidades de negocio</div>
+      ${allUnidades.map(u=>{
+        const uc=allCampos.filter(c=>c.unidad_negocio_id===u.id);
+        const has=uc.reduce((a,c)=>a+(c.hectareas||0),0);
+        return`<div class="bar-row">
+          <span class="dot dot-green"></span>
+          <span class="bar-label">${u.nombre}</span>
+          <span style="flex:1;font-size:.78rem;color:var(--muted)">${uc.map(c=>c.nombre).join(', ')}</span>
+          <span style="font-size:.78rem;font-weight:500;min-width:80px;text-align:right">${has>0?has.toLocaleString('es-AR')+' ha':'—'}</span>
+        </div>`;
+      }).join('')}
+    </div>
+    ${distribucionTenenciaHTML(allCampos, tenResumen, anioTen)}
+    ${tablaEcologiaHTML(ecoInds, ecoEntries, allCampos)}
+    <div class="card" style="margin-top:1rem">
       <div class="card-title">Últimas cargas</div>
       ${entries&&entries.length>0?`<div class="table-wrap"><table>
         <thead><tr><th>Indicador</th><th>Categoría</th><th>Valor</th><th>Estado</th><th>Campo</th><th>Cargado por</th><th>Período</th></tr></thead>
@@ -881,22 +911,74 @@ async function renderResumen(){
           <td>${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
         </tr>`;}).join('')}</tbody>
       </table></div>`:'<div style="text-align:center;padding:2rem;color:var(--muted);font-size:.85rem">Todavía no hay cargas registradas.</div>'}
+    </div>`;
+  filtrarIndicadoresResumen();
+}
+
+function tablaIndicadoresResumenHTML(){
+  const inds=window._resumenInds||[];
+  const cats=[...new Set(inds.map(e=>e.indicadores?.categoria).filter(Boolean))];
+  const anios=[...new Set(inds.map(e=>e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').getFullYear():null).filter(Boolean))].sort((a,b)=>b-a);
+  return `<div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Indicadores cargados</div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+      <select class="form-select" id="ti-anio" style="width:auto" onchange="filtrarIndicadoresResumen()"><option value="">Todos los años</option>${anios.map(a=>`<option value="${a}">${a}</option>`).join('')}</select>
+      <select class="form-select" id="ti-cat" style="width:auto" onchange="filtrarIndicadoresResumen()"><option value="">Todas las categorías</option>${cats.map(c=>`<option value="${c}">${CAT_LABELS[c]||c}</option>`).join('')}</select>
+      <input type="text" class="form-input" id="ti-buscar" placeholder="🔍 Buscar indicador..." oninput="filtrarIndicadoresResumen()" style="flex:1;min-width:180px"/>
     </div>
-    <div class="card">
-      <div class="card-title">Unidades de negocio</div>
-      ${allUnidades.map(u=>{
-        const uc=allCampos.filter(c=>c.unidad_negocio_id===u.id);
-        const has=uc.reduce((a,c)=>a+(c.hectareas||0),0);
-        return`<div class="bar-row">
-          <span class="dot dot-green"></span>
-          <span class="bar-label">${u.nombre}</span>
-          <span style="flex:1;font-size:.78rem;color:var(--muted)">${uc.map(c=>c.nombre).join(', ')}</span>
-          <span style="font-size:.78rem;font-weight:500;min-width:80px;text-align:right">${has>0?has.toLocaleString('es-AR')+' ha':'—'}</span>
-        </div>`;
-      }).join('')}
-    </div>
-    ${distribucionTenenciaHTML(allCampos, tenResumen, anioTen)}
-    ${tablaEcologiaHTML(ecoInds, ecoEntries, allCampos)}`;
+    <div id="tabla-inds-body"><div class="loading">Cargando...</div></div>
+  </div>`;
+}
+
+function filtrarIndicadoresResumen(){
+  const cont=document.getElementById('tabla-inds-body');
+  if(!cont)return;
+  const inds=window._resumenInds||[];
+  const alertaMap=window._resumenAlertas||{};
+  const nombreDe=window._resumenNombres||{};
+  const fAnio=document.getElementById('ti-anio')?.value||'';
+  const fCat=document.getElementById('ti-cat')?.value||'';
+  const fBuscar=normalizarTexto(document.getElementById('ti-buscar')?.value||'');
+  const filas=inds.filter(e=>{
+    if(fAnio){ const y=e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').getFullYear():null; if(String(y)!==fAnio)return false; }
+    if(fCat && e.indicadores?.categoria!==fCat)return false;
+    if(fBuscar && !normalizarTexto(e.indicadores?.nombre||'').includes(fBuscar))return false;
+    return true;
+  });
+  if(filas.length===0){cont.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--muted);font-size:.85rem">No hay indicadores que coincidan con el filtro.</div>';return;}
+  const rango=(e)=>{
+    const a=alertaMap[e.indicador_id+'_'+e.unidad_negocio_id];
+    if(!a||(a.alerta_min==null&&a.alerta_max==null))return '<span style="color:var(--muted)">—</span>';
+    const rangoStr=(a.alerta_min!=null?a.alerta_min:'')+((a.alerta_min!=null&&a.alerta_max!=null)?'–':'')+(a.alerta_max!=null?a.alerta_max:'');
+    if(e.valor==null)return rangoStr;
+    const fuera=(a.alerta_min!=null&&e.valor<a.alerta_min)||(a.alerta_max!=null&&e.valor>a.alerta_max);
+    return fuera?`<span style="color:#8B1C1C;font-weight:600">${rangoStr} ⚠️</span>`:`<span style="color:var(--success);font-weight:600">${rangoStr} ✓</span>`;
+  };
+  const estadoBadge=(e)=>{
+    if(e.estado==='rechazado')return '<span class="badge" style="background:#F4E4E4;color:#8B1C1C;font-size:.66rem">✗ Rechazado</span>';
+    if(!CATS_APROBACION.includes(e.indicadores?.categoria))return '<span class="badge badge-ok" style="font-size:.66rem">✓</span>';
+    if(e.estado==='aprobado')return '<span class="badge" style="background:#E8F0EB;color:var(--accent);font-size:.66rem">✓ Aprob.</span>';
+    return '<span class="badge" style="background:#FBF3D5;color:#7A5A00;font-size:.66rem">⏳ Pend.</span>';
+  };
+  cont.innerHTML=`<div class="table-wrap"><table>
+    <thead><tr><th>Indicador</th><th>Categoría</th><th>Unidad / Campo</th><th>Valor</th><th>Rango</th><th>Cargó</th><th>Período</th><th>Estado</th></tr></thead>
+    <tbody>${filas.map(e=>{
+      const val=e.valor!=null?Number(e.valor).toLocaleString('es-AR',{maximumFractionDigits:2}):(e.valor_texto||'—');
+      const um=e.indicadores?.unidad_medida||'';
+      const uc=(e.unidades_negocio?.nombre||'—')+(e.campos?.nombre?' · '+e.campos.nombre:'');
+      return `<tr>
+        <td>${e.indicadores?.nombre||'—'}</td>
+        <td><span class="badge badge-na">${CAT_LABELS[e.indicadores?.categoria]||'—'}</span></td>
+        <td style="font-size:.82rem">${uc}</td>
+        <td><strong>${val}</strong> <span style="color:var(--muted);font-size:.72rem">${um}</span></td>
+        <td style="font-size:.82rem">${rango(e)}</td>
+        <td style="font-size:.82rem">${nombreDe[e.user_id]||'—'}</td>
+        <td style="font-size:.82rem">${e.periodo_fecha?new Date(e.periodo_fecha+'T12:00:00').toLocaleDateString('es-AR'):'—'}</td>
+        <td>${estadoBadge(e)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>
+  <div style="font-size:.72rem;color:var(--muted);margin-top:.5rem">${filas.length} indicador${filas.length>1?'es':''}</div>`;
 }
 
 // ── CARGA ──

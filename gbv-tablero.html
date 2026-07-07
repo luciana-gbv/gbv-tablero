@@ -779,7 +779,7 @@ async function enviarRecordatoriosAhora(){
 // ── RESUMEN ──
 async function renderResumen(){
   const{data:entries}=await sb.from('entries')
-    .select('*,indicadores(nombre,categoria),profiles(nombre,apellido),campos(nombre)')
+    .select('*,indicadores(nombre,categoria),profiles!entries_user_id_fkey(nombre,apellido),campos(nombre)')
     .order('created_at',{ascending:false}).limit(20);
   const anioTen=new Date().getFullYear();
   const{data:tenResumen}=await sb.from('tenencia_campos').select('*').eq('anio',anioTen);
@@ -1800,7 +1800,7 @@ async function renderBandeja(){
   main.innerHTML='<div class="loading">Cargando...</div>';
 
   const{data:entries}=await sb.from('entries')
-    .select('*,indicadores(nombre,categoria),profiles(nombre,apellido),campos(nombre),unidades_negocio(nombre)')
+    .select('*,indicadores(nombre,categoria),profiles!entries_user_id_fkey(nombre,apellido),campos(nombre),unidades_negocio(nombre)')
     .order('created_at',{ascending:false})
     .limit(100);
 
@@ -4099,7 +4099,7 @@ async function loadHistorico(){
   const todosMarcado=document.getElementById('hist-campo-todos')?.checked;
   const camposSeleccionados=[...document.querySelectorAll('.hist-campo-check:checked')].map(c=>c.value);
 
-  let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max,por_campo),campos(nombre,hectareas,unidades_negocio(nombre)),unidades_negocio(nombre),profiles(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:true});
+  let query=sb.from('entries').select('*,indicadores(nombre,unidad_medida,alerta_min,alerta_max,por_campo),campos(nombre,hectareas,unidades_negocio(nombre)),unidades_negocio(nombre),profiles!entries_user_id_fkey(nombre,apellido)').eq('indicador_id',indId).order('periodo_fecha',{ascending:true});
   if(!todosMarcado&&camposSeleccionados.length>0) query=query.in('campo_id',camposSeleccionados);
   const{data:entries}=await query;
 
@@ -4312,7 +4312,7 @@ async function getEntriesAnios(anios){
   if(!anios||anios.length===0) return [];
   const min=Math.min(...anios), max=Math.max(...anios);
   const{data}=await sb.from('entries')
-    .select('*,indicadores(nombre,categoria,unidad_medida,alerta_min,alerta_max),unidades_negocio(nombre),campos(nombre),profiles(nombre,apellido)')
+    .select('*,indicadores(nombre,categoria,unidad_medida,alerta_min,alerta_max),unidades_negocio(nombre),campos(nombre),profiles!entries_user_id_fkey(nombre,apellido)')
     .gte('periodo_fecha',`${min}-01-01`)
     .lte('periodo_fecha',`${max}-12-31`)
     .order('periodo_fecha',{ascending:false});
